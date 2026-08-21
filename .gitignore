@@ -1,0 +1,28 @@
+# Build outputs
+/build/
+/cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+
+# Runtime outputs
+/output/
+/Log/
+
+# Local editor files
+.vscode/
+.idea/
+.agents/
+.codex/
+.git-local/
+*.swp
+*~
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# System files
+.DS_Store
+Thumbs.db
