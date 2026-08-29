@@ -4,6 +4,8 @@
 
 当前可回退基线版本说明：[`docs/releases/2026-08-21-rgbd-baseline.md`](docs/releases/2026-08-21-rgbd-baseline.md)。该版本是加入手部 21 点三维骨骼约束之前的稳定保存点。
 
+YOLOv8 单输出 INT8 模型在 RK3588 上检测不到目标的问题记录：[`docs/yolov8-int8-single-output-issue-20260827.md`](docs/yolov8-int8-single-output-issue-20260827.md)。
+
 当前 `main.cpp` 默认清空了配置里的 `steps` 和 `rois`，实际运行模式是检测与可视化链路。SOP 状态机、ROI、超时和 3D 距离规则代码已经保留在工程内，恢复配置后即可接回步骤判断。
 
 ## 目录结构
@@ -40,8 +42,9 @@
 2. 根据 `input.type` 打开输入源。支持 `video`、`camera`、`gstreamer`、`orbbec`。
 3. 每帧读取 `RgbdFrame`。普通视频没有深度，Orbbec 输入会返回 D2C 对齐后的彩色图和深度图。
 4. 同一帧依次执行 YOLOv8 和手部检测。两个 RKNN context 串行调用，避免同时抢占 RK3588 NPU 队列。
-5. 对目标框中心、手腕和手心查询 3D 坐标。
-6. 把结果交给状态机和可视化模块，输出窗口画面、日志、可选结果视频。
+5. 对目标框中心、手心和 21 个手部关键点查询真实 3D 坐标。
+6. 对 21 点执行固定骨长、异常点拒绝、短时遮挡恢复和时序平滑。
+7. 把约束后的 3D 骨架投影回彩色图，再交给状态机和可视化模块。
 
 窗口左上角显示当前模式，右上角显示每帧耗时，包括读帧、YOLO、手部检测、3D 查询、状态机、绘制和整帧处理耗时。
 
@@ -70,7 +73,7 @@
 - 根据 wrist 到 middle MCP 的方向生成旋转手部 ROI，裁成 224x224 后送入 landmark 模型。
 - landmark 输出 21 个三维相对关键点，使用仿射矩阵映射回原图归一化坐标。
 
-手腕点使用第 0 个关键点。可视化时会画出手部框、21 点和骨架连接线。
+手腕点使用第 0 个关键点。RKNN 输出的相对 `z` 不作为真实距离使用，米制三维位置统一从对齐深度图查询。
 
 ### RGB-D 空间点
 
@@ -81,13 +84,27 @@
 - 查询深度时从小到大扩大邻域，优先选择靠近相机的有效深度，降低空洞和背景混入影响。
 - 有 Orbbec 标定参数时调用 SDK 的 `calibration2dTo3d`；没有标定参数时退回到简化反投影。
 
-目标使用检测框中心点查询 3D 坐标。手部查询 wrist 和 palm；手心点无深度时，会继续查询掌部关键点和手框内部采样点。
+目标使用检测框中心点查询 3D 坐标。手部查询 wrist、palm 和 21 个关键点；手心点无深度时，会继续查询掌部关键点和手框内部采样点。21 点使用较小深度邻域，避免指尖深度空洞时误取远处背景。
+
+### 手部三维骨骼约束
+
+`HandSkeletonConstraint` 是独立运动学模块，不依赖 RKNN、OpenCV 或 Orbbec SDK：
+
+- 原始深度点和约束后点分别保存在 `measured_position`、`constrained_position`，便于排查误差来源。
+- 每根骨骼独立收集有效长度并取中位数，不要求 21 点同时有深度。
+- 已有初始骨长后拒绝明显长度离群值；单帧骨段方向翻转超过 120 度时按误检处理。
+- 使用轻量 PBD 迭代恢复固定骨长，并限制遮挡点出现不合理反折。
+- 深度短时缺失时沿用上一帧受约束姿态，超过最大预测帧数后将该点置为无效。
+- 双手按手框 IoU 和中心距离做全组合最小代价匹配，检测顺序交换时保持各自历史。
+- 输出五根手指的单位方向向量及掌面法向量。
+
+画面中黄色点表示约束后有有效三维点，橙色点表示遮挡预测点，蓝色点表示没有有效三维点。即使3D到彩色图投影失败，也会使用二维关键点显示，并不会把有效3D误判成蓝色点。手指方向仍保存在结果数据中，不在画面绘制箭头。
 
 ### SOP 状态机
 
 `SopStateMachine` 是规则层，配置结构在 `SopStepConfig`：
 
-- `required_objects`：当前步骤必须出现的目标类别。
+- `required_objects`：当前步骤必须出现的目标及最小数量。
 - `min_stage_sec`：步骤最小驻留时间，防止刚切换步骤时被上一帧残留结果误确认。
 - `min_confirm_frames`：连续满足多少帧后推进步骤。
 - `timeout_sec`：步骤超时时间，超过后生成 warning。
@@ -140,6 +157,18 @@ input.type=orbbec
 
 按 `Esc` 退出窗口。没有桌面环境或 OpenCV 窗口初始化失败时，程序会切到日志模式。
 
+## SOP 工作台页面
+
+页面入口为 [`web/index.html`](web/index.html)。它是独立的浏览器工作台，包含实时画面区域、RGB-D 采集状态、步骤计时、完成率、连续确认帧数和跳步/超时/深度异常预警。
+
+在工程根目录启动静态预览：
+
+```bash
+python3 -m http.server 4173
+```
+
+然后打开 `http://127.0.0.1:4173/web/index.html`。页面默认加载 `config/demo.mp4` 作为离线画面，并提供 Gemini RGB-D、网络流、640x480、1280x720 和 1920x1080 的界面选项。当前正式程序还没有 HTTP 视频推流或结构化状态服务，因此页面默认使用演示状态；后端接入后可通过 `?api=http://设备地址` 轮询 `/api/sop/state`，返回 `steps`、`current_elapsed_sec` 和 `total_elapsed_sec` 即可更新流程面板。
+
 ## 配置说明
 
 主配置文件是 `config/sop_config.txt`。
@@ -160,6 +189,10 @@ hand.backend=rknn
 hand.model_path=models/hand_detector.rknn
 hand.landmark_model_path=models/hand_landmarks.rknn
 hand.max_num_hands=2
+hand.constraint.enabled=true
+hand.constraint.calibration_frames=45
+hand.constraint.smoothing=0.35
+hand.constraint.max_prediction_frames=8
 ```
 
 SOP 步骤格式：
@@ -168,18 +201,15 @@ SOP 步骤格式：
 step.N=id|name|required_objects|hand_roi|min_frames|timeout_sec|warning|max_3d_distance_m|min_stage_sec
 ```
 
+`required_objects` 支持 `label` 或 `label:count`，后者用于数量校验。
+
 示例：
 
 ```text
-step.0=base_frame_joint|安装底座与骨架连接处|base,frame|joint_area|8|10|未检测到底座/骨架或手部未进入连接区域|0|0.8
+step.0=base_frame_joint|安装底座与骨架连接处|base:1,frame:1|joint_area|8|10|未检测到底座/骨架或手部未进入连接区域|0|0.8
 ```
 
-注意：当前主程序默认执行检测链路，`main.cpp` 中会清空 `steps` 和 `rois`。需要启用 SOP 步骤判断时，删除这两行：
-
-```cpp
-config.steps.clear();
-config.rois.clear();
-```
+当前主流程会直接读取配置里的 `steps` 和 `rois`，按 `config/sop_config.txt` 修改即可生效。
 
 ## 模型文件
 
@@ -204,28 +234,37 @@ third_party/ultralytics_yolov8_rknn/RKOPT_README.zh-CN.md
 1. 在训练机准备 Python 环境，并安装 `third_party/ultralytics_yolov8_rknn` 需要的依赖。
 2. 按 YOLO 数据集格式准备图片、标签和 data yaml。
 3. 使用 Ultralytics 训练检测模型，得到 `.pt` 权重。
-4. 修改 `third_party/ultralytics_yolov8_rknn/ultralytics/cfg/default.yaml` 中的 `model` 路径，指向训练得到的 `.pt`。
-5. 在 `third_party/ultralytics_yolov8_rknn` 目录执行 ONNX 导出：
+4. 导出 RKNN 优化版 ONNX。这个步骤必须从 `.pt` 权重导出，不能直接复用普通 YOLOv8 单输出 ONNX 做 INT8 量化：
 
 ```bash
-python ./ultralytics/engine/exporter.py
+python3 scripts/export_ai_sop_rknnopt_onnx.py \
+  --weights models/ai_sop_best.pt \
+  --output models/ai_sop_best_rknnopt.onnx
 ```
 
-6. 使用 RKNN-Toolkit2 将 ONNX 转成 RK3588 可运行的 `.rknn`。量化时可使用 `models/calibration/dataset.txt` 指定校准图片。
-7. 把生成的 RKNN 模型放到 `models/`，例如：
+5. 使用 RKNN-Toolkit2 将优化版 ONNX 转成 RK3588 可运行的 INT8 `.rknn`。量化时可使用 `models/calibration/dataset.txt` 指定校准图片：
+
+```bash
+python3 scripts/export_ai_sop_rknn_int8.py \
+  --onnx models/ai_sop_best_rknnopt.onnx \
+  --output models/ai_sop_best_int8.rknn \
+  --dataset models/calibration/dataset.txt
+```
+
+6. 把生成的 RKNN 模型放到 `models/`，例如：
 
 ```text
-models/yolov8.rknn
+models/ai_sop_best_int8.rknn
 ```
 
-8. 同步修改 `config/sop_config.txt`：
+7. 同步修改 `config/sop_config.txt`：
 
 ```text
-detector.model_path=models/yolov8.rknn
-detector.labels=base,frame,mirror,screw
+detector.model_path=models/ai_sop_best_int8.rknn
+detector.labels=cover_cloth,long_handle,manual,padding_board,small_red_lever,top_pad,vertical_support_bracket
 ```
 
-9. 在 RK3588 板端编译并运行：
+8. 在 RK3588 板端编译并运行：
 
 ```bash
 ./scripts/build.sh

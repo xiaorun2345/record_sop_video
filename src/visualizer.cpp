@@ -32,13 +32,22 @@ static std::string FormatPoint3D(const Point3D& point) {
 }
 
 void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const SopStateMachine& state_machine) const {
-  // 这里直接在 frame->bgr_data 上构造 cv::Mat 视图。
-  // 好处是不用额外拷贝整帧图像，画完后 frame 仍然保留最新像素。
+  // OpenCV 显示、绘制和编码统一按 BGR 处理；Orbbec 输入则先从内部 RGB 转成 BGR。
 #if RK3588_SOP_HAS_OPENCV
-  if (frame == nullptr || frame->bgr_data.empty()) {
+  if (frame == nullptr || frame->bgr_data.empty() || frame->width <= 0 || frame->height <= 0) {
     return;
   }
-  cv::Mat image(frame->height, frame->width, CV_8UC3, frame->bgr_data.data());
+
+  const bool needs_rgb_to_bgr = frame->pixel_format == PixelFormat::RGB;
+  cv::Mat image;
+  cv::Mat converted;
+  if (needs_rgb_to_bgr) {
+    const cv::Mat rgb(frame->height, frame->width, CV_8UC3, frame->bgr_data.data());
+    cv::cvtColor(rgb, converted, cv::COLOR_RGB2BGR);
+    image = converted;
+  } else {
+    image = cv::Mat(frame->height, frame->width, CV_8UC3, frame->bgr_data.data());
+  }
   // 检测框旁显示类别和 3D 坐标，便于检查 RGB-D 对齐效果。
   for (std::size_t i = 0; i < result.objects.size(); ++i) {
     const ObjectDetection& object = result.objects[i];
@@ -62,36 +71,72 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
   // 手部关键点用于观察 RKNN 手部关键点输出是否稳定。
   for (std::size_t hand_index = 0; hand_index < result.hands.size(); ++hand_index) {
     const HandPose& hand = result.hands[hand_index];
-    static const std::array<std::pair<int, int>, 20> hand_connections = {{
+    static const std::array<std::pair<int, int>, 23> hand_connections = {{
         {0, 1}, {1, 2}, {2, 3}, {3, 4},
         {0, 5}, {5, 6}, {6, 7}, {7, 8},
         {0, 9}, {9, 10}, {10, 11}, {11, 12},
         {0, 13}, {13, 14}, {14, 15}, {15, 16},
         {0, 17}, {17, 18}, {18, 19}, {19, 20},
+        // 增加掌部横向连接，让 5、9、13、17 四个掌指关节点形成掌骨轮廓。
+        {5, 9}, {9, 13}, {13, 17},
     }};
     const cv::Scalar hand_color = hand_index == 0U ? cv::Scalar(255, 255, 255) : cv::Scalar(255, 255, 0);
     if (hand.box.width > 0 && hand.box.height > 0) {
       cv::Rect hand_rect(hand.box.x, hand.box.y, hand.box.width, hand.box.height);
       cv::rectangle(image, hand_rect, hand_color, 2);
-      const std::string hand_label = "hand " + std::to_string(hand_index) + " " + std::to_string(hand.score);
+      std::string hand_label = "hand " + std::to_string(hand_index);
+      if (hand.skeleton_track_id >= 0) {
+        hand_label += " #" + std::to_string(hand.skeleton_track_id);
+      }
+      hand_label += " " + std::to_string(hand.score);
       cv::putText(image, hand_label, cv::Point(hand.box.x, std::max(20, hand.box.y - 6)),
                   cv::FONT_HERSHEY_SIMPLEX, 0.5, hand_color, 1);
     }
     std::vector<cv::Point> points;
+    std::vector<bool> point_has_3d;
     points.reserve(hand.landmarks.size());
-    for (const HandLandmark& landmark : hand.landmarks) {
-      points.emplace_back(static_cast<int>(landmark.x * frame->width), static_cast<int>(landmark.y * frame->height));
+    point_has_3d.reserve(hand.landmarks.size());
+    for (std::size_t landmark_index = 0; landmark_index < hand.landmarks.size(); ++landmark_index) {
+      const HandLandmark& landmark = hand.landmarks[landmark_index];
+      if (landmark_index < hand.joints_3d.size()) {
+        const HandJoint3D& joint = hand.joints_3d[landmark_index];
+        // 3D 有效性以 constrained_position 为准，不能因为 SDK 投影失败就丢掉真实三维状态。
+        const bool has_constrained_3d = joint.constrained_position.valid;
+        if (joint.projected_pixel_valid) {
+          const ImagePoint& pixel = joint.projected_pixel;
+          points.emplace_back(pixel.x, pixel.y);
+        } else {
+          // 投影失败时仍使用 RKNN 二维位置显示，避免把“投影失败”误报成“深度查询失败”。
+          points.emplace_back(static_cast<int>(landmark.x * frame->width),
+                             static_cast<int>(landmark.y * frame->height));
+        }
+        point_has_3d.push_back(has_constrained_3d);
+      } else {
+        // 当前点没有有效三维位置时回退到 RKNN 二维点，保证骨架不会整段消失。
+        points.emplace_back(static_cast<int>(landmark.x * frame->width),
+                            static_cast<int>(landmark.y * frame->height));
+        point_has_3d.push_back(false);
+      }
     }
     for (const std::pair<int, int>& connection : hand_connections) {
       if (connection.first < static_cast<int>(points.size()) && connection.second < static_cast<int>(points.size())) {
-        cv::line(image, points[connection.first], points[connection.second], hand_color, 2);
+        const bool constrained_line = point_has_3d[static_cast<std::size_t>(connection.first)] &&
+                                      point_has_3d[static_cast<std::size_t>(connection.second)];
+        const cv::Scalar line_color = constrained_line ? hand_color : cv::Scalar(140, 140, 140);
+        cv::line(image, points[connection.first], points[connection.second], line_color, constrained_line ? 3 : 1);
       }
     }
     for (std::size_t i = 0; i < points.size(); ++i) {
-      const int radius = i == 0U ? 8 : 5;
-      cv::circle(image, points[i], radius, cv::Scalar(255, 0, 0), -1);
-      cv::circle(image, points[i], radius, cv::Scalar(255, 255, 255), 1);
+      const int radius = i == 0U ? 3 : 2;
+      cv::Scalar joint_color(255, 0, 0);
+      if (i < hand.joints_3d.size() && point_has_3d[i]) {
+        // 橙色表示遮挡预测点，黄色表示由当前帧真实深度参与约束的点。
+        joint_color = hand.joints_3d[i].predicted ? cv::Scalar(0, 165, 255) : cv::Scalar(0, 255, 255);
+      }
+      cv::circle(image, points[i], radius, joint_color, -1);
+      cv::circle(image, points[i], radius + 1, cv::Scalar(255, 255, 255), 1);
     }
+
     if (hand.palm_pixel_valid) {
       // 黄色十字始终表示实际查询深度的手心像素。
       cv::Point palm_center(hand.palm_pixel.x, hand.palm_pixel.y);
@@ -122,6 +167,11 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
     const std::string alert_text = alert.level + ": " + alert.step_id;
     cv::putText(image, alert_text, cv::Point(20, alert_y), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
     alert_y += 32;
+  }
+
+  if (needs_rgb_to_bgr) {
+    frame->bgr_data.assign(image.data, image.data + image.total() * image.elemSize());
+    frame->pixel_format = PixelFormat::BGR;
   }
 #else
   (void)frame;

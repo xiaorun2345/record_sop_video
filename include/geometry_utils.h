@@ -38,6 +38,11 @@ const RoiRegion* FindRoiByName(const std::vector<RoiRegion>& rois, const std::st
 bool HasObjectLabel(const std::vector<ObjectDetection>& objects, const std::string& label);
 
 /**
+ * @brief 统计指定类别的检测目标数量。
+ */
+int CountObjectLabel(const std::vector<ObjectDetection>& objects, const std::string& label);
+
+/**
  * @brief 判断手部腕点是否在 ROI 内。
  */
 bool HasHandInRoi(const std::vector<HandPose>& hands, const RoiRegion& roi, int image_width, int image_height);

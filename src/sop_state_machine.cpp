@@ -7,6 +7,7 @@
 
 #include "geometry_utils.h"
 
+#include <algorithm>
 #include <cmath>
 
 
@@ -35,6 +36,7 @@ const SopRuntimeState& SopStateMachine::Update(const PerceptionResult& result) {
 
   // 当前步骤是顺序推进的，因此只看 current_step_index 对应的那一项。
   const SopStepConfig& step = steps_[state_.current_step_index];
+  UpdateRequiredObjectHistory(step, result);
 
   // 最小驻留时间检查：当前步骤持续时间未达到阈值时，不允许确认，
   // 防止上一帧刚切换过来就因残留检测结果误判为完成。
@@ -57,6 +59,7 @@ const SopRuntimeState& SopStateMachine::Update(const PerceptionResult& result) {
     ++state_.current_step_index;
     state_.confirm_count = 0;
     state_.step_start_sec = result.timestamp_sec;
+    state_.required_object_max_counts.clear();
     if (state_.current_step_index >= static_cast<int>(steps_.size())) {
       state_.finished = true;
     }
@@ -83,9 +86,9 @@ const SopRuntimeState& SopStateMachine::state() const { return state_; }
 static const ObjectDetection* FindPrimaryObject(const PerceptionResult& result, const SopStepConfig& step) {
   // 当前只需要一个"主物体"做空间距离判断，所以返回第一项命中的 label。
   // 不做复杂排序，是为了保持逻辑简单直观。
-  for (const std::string& label : step.required_objects) {
+  for (const RequiredObjectConfig& required_object : step.required_objects) {
     for (const ObjectDetection& object : result.objects) {
-      if (object.label == label) {
+      if (object.label == required_object.label) {
         return &object;
       }
     }
@@ -107,12 +110,15 @@ bool SopStateMachine::IsCurrentStepSatisfied(const SopStepConfig& step, const Pe
   if (step.required_objects.empty()) {
     return false;
   }
+  if (state_.required_object_max_counts.size() != step.required_objects.size()) {
+    return false;
+  }
 
-  // 先做最便宜的判定：目标类别是否齐全。
-  // 这样一旦目标没到位，就不必继续做 3D 距离检查。
-  // 当前步骤要求的目标必须全部出现，例如配件和工具同时存在。
-  for (const std::string& label : step.required_objects) {
-    if (!HasObjectLabel(result.objects, label)) {
+  // 只要当前步骤中“曾经达到过”的数量满足要求，就保持满足状态。
+  // 这样检测抖动或短时遮挡不会把已经打过勾的物料重新变红。
+  for (std::size_t i = 0; i < step.required_objects.size(); ++i) {
+    const RequiredObjectConfig& required_object = step.required_objects[i];
+    if (state_.required_object_max_counts[i] < required_object.min_count) {
       return false;
     }
   }
@@ -136,6 +142,16 @@ bool SopStateMachine::IsCurrentStepSatisfied(const SopStepConfig& step, const Pe
   }
 
   return true;
+}
+
+void SopStateMachine::UpdateRequiredObjectHistory(const SopStepConfig& step, const PerceptionResult& result) {
+  if (state_.required_object_max_counts.size() != step.required_objects.size()) {
+    state_.required_object_max_counts.assign(step.required_objects.size(), 0);
+  }
+  for (std::size_t i = 0; i < step.required_objects.size(); ++i) {
+    const int current_count = CountObjectLabel(result.objects, step.required_objects[i].label);
+    state_.required_object_max_counts[i] = std::max(state_.required_object_max_counts[i], current_count);
+  }
 }
 
 void SopStateMachine::UpdateTimeoutAlert(const SopStepConfig& step, const double timestamp_sec) {

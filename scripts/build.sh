@@ -8,11 +8,13 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-/tmp/rk3588_sop_build}"
 OUTPUT_DIR="${PROJECT_DIR}/output"
+OUTPUT_LIB_DIR="${OUTPUT_DIR}/lib"
 OUTPUT_BIN="${OUTPUT_DIR}/rk3588_sop"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 RKNN_ROOT="${RKNN_ROOT:-/usr}"
 ENABLE_ORBBEC="${ENABLE_ORBBEC:-AUTO}"
 ORBBEC_SDK_ROOT="${ORBBEC_SDK_ROOT:-}"
+BUILD_GENERATOR="${BUILD_GENERATOR:-Ninja}"
 
 usage() {
   cat <<EOF
@@ -23,6 +25,7 @@ Environment:
   RKNN_ROOT         RKNN runtime root, default: /usr
   ENABLE_ORBBEC     ON/OFF/AUTO, default: AUTO
   ORBBEC_SDK_ROOT   Orbbec SDK path, optional when SDK is in third_party/orbbec_sdk or /opt/orbbec
+  BUILD_GENERATOR    CMake generator, default: Ninja
 EOF
 }
 
@@ -91,9 +94,20 @@ if [[ "${ENABLE_ORBBEC}" == "AUTO" ]]; then
   fi
 fi
 
+if [[ "${BUILD_GENERATOR}" == "Ninja" ]] && ! command -v ninja >/dev/null 2>&1; then
+  echo "未找到 ninja，改用 Unix Makefiles" >&2
+  BUILD_GENERATOR="Unix Makefiles"
+fi
+
+if [[ "${BUILD_GENERATOR}" == "Unix Makefiles" ]] && ! command -v make >/dev/null 2>&1; then
+  echo "未找到 make。请先安装 make、g++、cmake、ninja-build 或设置 BUILD_GENERATOR=Ninja 后安装 ninja" >&2
+  exit 1
+fi
+
 CMAKE_ARGS=(
   -S "${PROJECT_DIR}"
   -B "${BUILD_DIR}"
+  -G "${BUILD_GENERATOR}"
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
   -DENABLE_RKNN=ON
   -DRKNN_ROOT="${RKNN_ROOT}"
@@ -108,9 +122,29 @@ cmake "${CMAKE_ARGS[@]}"
 cmake --build "${BUILD_DIR}" -j"$(nproc)"
 
 mkdir -p "${OUTPUT_DIR}"
+mkdir -p "${OUTPUT_LIB_DIR}"
 cp -f "${BUILD_DIR}/rk3588_sop" "${OUTPUT_BIN}"
 chmod +x "${OUTPUT_BIN}"
+
+copy_if_exists() {
+  local src="$1"
+  local dst_dir="$2"
+  if [[ -e "${src}" ]]; then
+    cp -P -f "${src}" "${dst_dir}/"
+  fi
+}
+
+copy_if_exists "/usr/lib/librknnrt.so" "${OUTPUT_LIB_DIR}"
+copy_if_exists "/lib/librknnrt.so" "${OUTPUT_LIB_DIR}"
+copy_if_exists "${PROJECT_DIR}/third_party/orbbec_sdk/lib/libOrbbecSDK.so" "${OUTPUT_LIB_DIR}"
+copy_if_exists "${PROJECT_DIR}/third_party/orbbec_sdk/lib/libOrbbecSDK.so.1.10" "${OUTPUT_LIB_DIR}"
+copy_if_exists "${PROJECT_DIR}/third_party/orbbec_sdk/lib/libOrbbecSDK.so.1.10.27" "${OUTPUT_LIB_DIR}"
+copy_if_exists "${PROJECT_DIR}/third_party/orbbec_sdk/lib/libdepthengine.so" "${OUTPUT_LIB_DIR}"
+copy_if_exists "${PROJECT_DIR}/third_party/orbbec_sdk/lib/libdepthengine.so.2.0" "${OUTPUT_LIB_DIR}"
+copy_if_exists "${PROJECT_DIR}/third_party/orbbec_sdk/lib/liblive555.so" "${OUTPUT_LIB_DIR}"
+copy_if_exists "${PROJECT_DIR}/third_party/orbbec_sdk/lib/libob_usb.so" "${OUTPUT_LIB_DIR}"
 
 echo "输出程序: ${OUTPUT_BIN}"
 echo "默认配置: ${PROJECT_DIR}/config/sop_config.txt"
 echo "奥比中光 SDK: ${ENABLE_ORBBEC}${ORBBEC_SDK_ROOT:+ (${ORBBEC_SDK_ROOT})}"
+echo "运行库目录: ${OUTPUT_LIB_DIR}"

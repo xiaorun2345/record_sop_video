@@ -1,0 +1,49 @@
+# name: xiaorun
+# email: 15610499173@163.com
+
+# Gemini 深度相机 RKNN 配置：先用官方 YOLOv8 RKNN 跑通物体检测流程，手部仍用现有 RKNN。
+# 如需回放本地视频，改为 input.type=video 且 input.uri=config/demo.mp4。
+input.type=orbbec
+input.width=640
+input.height=480
+input.fps=30
+
+detector.backend=rknn
+detector.model_path=models/yolov8_coco80.rknn
+detector.labels=person,bicycle,car,motorcycle,airplane,bus,train,truck,boat,traffic light,fire hydrant,stop sign,parking meter,bench,bird,cat,dog,horse,sheep,cow,elephant,bear,zebra,giraffe,backpack,umbrella,handbag,tie,suitcase,frisbee,skis,snowboard,sports ball,kite,baseball bat,baseball glove,skateboard,surfboard,tennis racket,bottle,wine glass,cup,fork,knife,spoon,bowl,banana,apple,sandwich,orange,broccoli,carrot,hot dog,pizza,donut,cake,chair,couch,potted plant,bed,dining table,toilet,tv,laptop,mouse,remote,keyboard,cell phone,microwave,oven,toaster,sink,refrigerator,book,clock,vase,scissors,teddy bear,hair drier,toothbrush
+detector.conf_threshold=0.65
+detector.iou_threshold=0.45
+detector.input_size=640
+
+hand.backend=rknn
+hand.input_size=0
+hand.model_path=models/hand_detector.rknn
+hand.landmark_model_path=models/hand_landmarks.rknn
+hand.max_num_hands=2
+hand.min_detection_confidence=0.5
+hand.min_tracking_confidence=0.5
+hand.constraint.enabled=true
+hand.constraint.calibration_frames=45
+hand.constraint.smoothing=0.35
+hand.constraint.max_prediction_frames=8
+
+serial_light.enabled=true
+serial_light.device_path=/dev/ch341-light
+serial_light.baud_rate=9600
+
+roi.0=work_area:60,120;660,120;660,820;60,820
+roi.1=joint_area:180,230;560,230;560,680;180,680
+roi.2=right_screw_area:390,280;660,280;660,760;390,760
+roi.3=left_screw_area:60,280;330,280;330,760;60,760
+
+# SOP 步骤: id|name|required_objects|hand_roi|min_frames|timeout_sec|warning|max_3d_distance_m(可选)|min_stage_sec(可选)
+# required_objects 支持 label 或 label:count，后者用于防漏发数量校验。
+step.0=base_frame_joint|安装底座与骨架连接处|base,frame|joint_area|8|10|未检测到底座/骨架或手部未进入连接区域|0|0.8
+step.1=frame_mirror_fix|固定骨架与镜面|frame,mirror|joint_area|8|10|未检测到骨架/镜面或固定动作异常|0|0.8
+step.2=right_screw|安装右边螺丝|screw|right_screw_area|8|12|右侧螺丝安装超时或手部位置异常|0|0.8
+step.3=left_screw|安装左边螺丝|screw|left_screw_area|8|12|左侧螺丝安装超时或手部位置异常|0|0.8
+step.4=final_check|安装完成检查|base,frame,mirror,screw|work_area|10|10|最终装配目标未全部检测到|0|1.0
+
+show_window=true
+save_video=false
+output_video_path=output/rknn_orbbec_result.avi

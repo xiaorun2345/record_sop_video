@@ -79,6 +79,11 @@ class SopStateMachine {
    */
   void UpdateSpatialAlert(const SopStepConfig& step, const PerceptionResult& result);
 
+  /**
+   * @brief 记录当前步骤下每个必检物体出现过的最大数量。
+   */
+  void UpdateRequiredObjectHistory(const SopStepConfig& step, const PerceptionResult& result);
+
   std::vector<SopStepConfig> steps_;
   SopRuntimeState state_;
 };

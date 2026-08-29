@@ -66,6 +66,19 @@ class VideoSource {
   bool QueryPoint3D(const RgbdFrame& frame, int pixel_x, int pixel_y, Point3D* point) const;
 
   /**
+   * @brief 在指定最大搜索半径内查询 RGB 像素对应的三维点。
+   *
+   * 手指关键点使用较小半径，避免在指尖深度空洞处误取远处背景。
+   */
+  bool QueryPoint3D(const RgbdFrame& frame, int pixel_x, int pixel_y,
+                    int max_search_radius, Point3D* point) const;
+
+  /**
+   * @brief 把彩色相机坐标系下的三维点投影回彩色图像素。
+   */
+  bool ProjectPointToColor(const RgbdFrame& frame, const Point3D& point, ImagePoint* pixel) const;
+
+  /**
    * @brief 释放输入源。
    */
   void Close();
@@ -74,7 +87,8 @@ class VideoSource {
   /**
    * @brief 从已对齐深度图读取深度值。
    */
-  bool QueryAlignedDepthPoint(const RgbdFrame& frame, int pixel_x, int pixel_y, Point3D* point) const;
+  bool QueryAlignedDepthPoint(const RgbdFrame& frame, int pixel_x, int pixel_y,
+                              int max_search_radius, Point3D* point) const;
 
   VideoInputConfig config_;
   std::int64_t frame_id_ = 0;

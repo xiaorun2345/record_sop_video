@@ -6,6 +6,7 @@
 #ifndef TOOLCHAINS_RK3588_EXAMPLES_RK3588_SOP_INCLUDE_SOP_TYPES_H_
 #define TOOLCHAINS_RK3588_EXAMPLES_RK3588_SOP_INCLUDE_SOP_TYPES_H_
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -97,6 +98,32 @@ struct HandLandmark {
 };
 
 /**
+ * @brief 单个手部关节的三维状态。
+ *
+ * measured_position 保存深度相机原始观测，constrained_position 保存骨骼约束结果。
+ * 两者分开保存，现场排查时才能判断误差来自深度查询还是约束算法。
+ */
+struct HandJoint3D {
+  Point3D measured_position;       // 深度相机查询到的原始三维点。
+  Point3D constrained_position;    // 固定骨长和时序约束后的三维点。
+  ImagePoint projected_pixel;      // 约束后三维点投影到彩色图的像素。
+  float confidence = 0.0F;         // 当前三维点的综合可信度，范围 0 到 1。
+  bool projected_pixel_valid = false; // 投影像素是否有效。
+  bool predicted = false;          // 是否因深度缺失或异常而使用历史姿态恢复。
+};
+
+/**
+ * @brief 手指方向和掌面法向量。
+ *
+ * finger_direction 顺序固定为拇指、食指、中指、无名指和小指。
+ * 方向向量使用 Point3D 承载，x/y/z 为单位向量分量，valid 表示是否可用。
+ */
+struct HandDirection3D {
+  std::array<Point3D, 5> finger_direction;
+  Point3D palm_normal;
+};
+
+/**
  * @brief 单手姿态检测结果。
  */
 struct HandPose {
@@ -108,6 +135,9 @@ struct HandPose {
   ImagePoint palm_pixel;                  // 手心二维像素位置。
   bool palm_pixel_valid = false;          // 手心二维像素是否有效。
   Point3D palm_position;                  // 手心三维位置。
+  std::array<HandJoint3D, 21> joints_3d;  // 21 个关键点对应的真实三维状态。
+  HandDirection3D directions;             // 约束后计算的手指方向和掌面法向量。
+  int skeleton_track_id = -1;             // 骨骼约束模块内部的手部时序 ID。
 };
 
 /**
@@ -133,6 +163,23 @@ struct PerceptionResult {
 };
 
 /**
+ * @brief 单帧处理耗时信息。
+ */
+struct FrameProcessMetrics {
+  double read_ms = 0.0;               // 读帧和帧拷贝耗时。
+  double object_inference_ms = 0.0;   // 目标检测耗时。
+  double hand_inference_ms = 0.0;     // 手部检测耗时。
+  double crop_ms = 0.0;               // 手部裁剪耗时。
+  double spatial_ms = 0.0;            // 三维查询和骨骼约束耗时。
+  double state_ms = 0.0;              // SOP 状态机耗时。
+  double draw_ms = 0.0;               // 结果绘制耗时。
+  double process_ms = 0.0;            // 单帧总耗时。
+  double yolo_npu_ms = 0.0;           // YOLO NPU 耗时。
+  double hand_det_npu_ms = 0.0;       // 手掌检测 NPU 耗时。
+  double hand_lm_npu_ms = 0.0;        // 手部关键点 NPU 耗时。
+};
+
+/**
  * @brief SOP 预警信息。
  */
 struct SopAlert {
@@ -142,12 +189,20 @@ struct SopAlert {
 };
 
 /**
+ * @brief 单个必检物体规则。
+ */
+struct RequiredObjectConfig {
+  std::string label;  // 物体类别名称。
+  int min_count = 1;  // 最少需要出现的数量。
+};
+
+/**
  * @brief SOP 步骤配置。
  */
 struct SopStepConfig {
   std::string id;                            // 步骤 ID。
   std::string name;                          // 步骤名称。
-  std::vector<std::string> required_objects;  // 当前步骤要求出现的目标类别。
+  std::vector<RequiredObjectConfig> required_objects;  // 当前步骤要求出现的目标及数量。
   std::string hand_roi;                      // 手部需要进入的 ROI 名称。
   int min_confirm_frames = 8;                // 连续确认帧数。
   double timeout_sec = 10.0;                 // 步骤超时时间，单位秒。
@@ -164,6 +219,7 @@ struct SopRuntimeState {
   bool finished = false;            // SOP 是否完成。
   int confirm_count = 0;            // 当前步骤连续满足帧数。
   double step_start_sec = 0.0;      // 当前步骤开始时间。
+  std::vector<int> required_object_max_counts;  // 当前步骤每个必检物体的历史最大数量。
   std::vector<SopAlert> alerts;     // 当前帧预警信息。
 };
 
@@ -204,12 +260,33 @@ struct HandPoseConfig {
 };
 
 /**
+ * @brief 手部三维骨骼约束配置。
+ */
+struct HandSkeletonConfig {
+  bool enabled = true;               // 是否启用 21 点三维骨骼约束。
+  int calibration_frames = 45;       // 每根骨骼用于稳定估计长度的有效样本数。
+  float smoothing = 0.35F;           // 新姿态在时序平滑中的权重，范围 0 到 1。
+  int max_prediction_frames = 8;     // 深度缺失后允许沿用运动学预测的最大帧数。
+};
+
+/**
+ * @brief 串口报警灯配置。
+ */
+struct SerialLightConfig {
+  bool enabled = true;                         // 是否启用 CH341 串口报警灯。
+  std::string device_path = "/dev/ch341-light"; // 固定设备路径，由 udev 初始化脚本创建。
+  int baud_rate = 9600;                        // 报警灯串口波特率。
+};
+
+/**
  * @brief SOP 应用配置。
  */
 struct SopAppConfig {
   VideoInputConfig input;               // 视频输入配置。
   DetectorConfig detector;              // YOLOv8 检测配置。
   HandPoseConfig hand_pose;             // 手部关键点配置。
+  HandSkeletonConfig hand_skeleton;     // 手部 21 点三维骨骼约束配置。
+  SerialLightConfig serial_light;        // CH341 串口报警灯配置。
   std::vector<RoiRegion> rois;          // ROI 配置列表。
   std::vector<SopStepConfig> steps;     // SOP 步骤列表。
   bool show_window = true;              // 是否显示窗口。

@@ -159,12 +159,12 @@ class Yolov8Detector {
   std::vector<ObjectDetection> ApplyNms(const std::vector<ObjectDetection>& detections) const;
 
   DetectorConfig config_;  // 检测模型路径、类别名、阈值、输入尺寸等配置。
+  std::int64_t last_rknn_run_us_ = 0;  // 最近一次纯 NPU 推理耗时，非 RKNN 模式下保持 0。
 #if RK3588_SOP_ENABLE_RKNN
   rknn_context rknn_context_ = 0;                   // RKNN runtime 句柄，生命周期由本类管理。
   rknn_input_output_num rknn_io_num_{};             // 模型输入/输出 tensor 数量。
   std::vector<rknn_tensor_attr> rknn_input_attrs_;  // 输入 tensor 属性，决定数据布局和类型。
   std::vector<rknn_tensor_attr> rknn_output_attrs_; // 输出 tensor 属性，决定后处理如何解析。
-  std::int64_t last_rknn_run_us_ = 0;               // RKNN runtime 报告的最近一次纯 NPU 推理耗时。
   bool rknn_initialized_ = false;                   // 防止未初始化就执行推理。
 #endif
 };

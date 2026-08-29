@@ -11,6 +11,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -254,6 +255,7 @@ static bool OpenVideoWithSoftwareDecode(cv::VideoCapture* capture, const std::st
     capture->release();
   }
 
+#if CV_VERSION_MAJOR > 4 || (CV_VERSION_MAJOR == 4 && CV_VERSION_MINOR >= 6)
   const std::vector<int> params = {
       cv::CAP_PROP_HW_ACCELERATION, cv::VIDEO_ACCELERATION_NONE,
       cv::CAP_PROP_HW_ACCELERATION_USE_OPENCL, 0,
@@ -261,6 +263,10 @@ static bool OpenVideoWithSoftwareDecode(cv::VideoCapture* capture, const std::st
       cv::CAP_PROP_READ_TIMEOUT_MSEC, 5000,
   };
   if (capture->open(uri, cv::CAP_FFMPEG, params)) {
+    return true;
+  }
+#endif
+  if (capture->open(uri, cv::CAP_FFMPEG)) {
     return true;
   }
   return capture->open(uri);
@@ -510,6 +516,12 @@ bool VideoSource::ReadRgbd(RgbdFrame* frame) {
 }
 
 bool VideoSource::QueryPoint3D(const RgbdFrame& frame, const int pixel_x, const int pixel_y, Point3D* point) const {
+  // 目标中心和手心保留较大搜索范围，以兼容深度图局部空洞。
+  return QueryPoint3D(frame, pixel_x, pixel_y, 25, point);
+}
+
+bool VideoSource::QueryPoint3D(const RgbdFrame& frame, const int pixel_x, const int pixel_y,
+                               const int max_search_radius, Point3D* point) const {
   if (point == nullptr) {
     return false;
   }
@@ -519,7 +531,7 @@ bool VideoSource::QueryPoint3D(const RgbdFrame& frame, const int pixel_x, const 
 #if RK3588_SOP_ENABLE_ORBBEC
     // 先从已对齐深度图取稳定深度，再交给 SDK 做 2D 到 3D 坐标转换。
     Point3D depth_point;
-    if (!QueryAlignedDepthPoint(frame, pixel_x, pixel_y, &depth_point)) {
+    if (!QueryAlignedDepthPoint(frame, pixel_x, pixel_y, max_search_radius, &depth_point)) {
       return false;
     }
     if (!impl_->has_calibration_param) {
@@ -546,7 +558,53 @@ bool VideoSource::QueryPoint3D(const RgbdFrame& frame, const int pixel_x, const 
 #endif
   }
 
-  return QueryAlignedDepthPoint(frame, pixel_x, pixel_y, point);
+  return QueryAlignedDepthPoint(frame, pixel_x, pixel_y, max_search_radius, point);
+}
+
+bool VideoSource::ProjectPointToColor(const RgbdFrame& frame, const Point3D& point, ImagePoint* pixel) const {
+  if (pixel == nullptr || !point.valid || point.z <= 0.0F || frame.color.width <= 0 || frame.color.height <= 0) {
+    return false;
+  }
+
+  float pixel_x = 0.0F;
+  float pixel_y = 0.0F;
+  bool projected_by_sdk = false;
+  if (config_.type == "orbbec") {
+#if RK3588_SOP_ENABLE_ORBBEC
+    if (impl_->has_calibration_param) {
+      const OBPoint3f camera_point{point.x * 1000.0F, point.y * 1000.0F, point.z * 1000.0F};
+      OBPoint2f color_pixel{};
+      // 约束点位于彩色相机坐标系，SDK 使用相同标定参数投回彩色图。
+      projected_by_sdk = ob::CoordinateTransformHelper::calibration3dTo2d(
+          impl_->calibration_param, camera_point, OB_SENSOR_COLOR, OB_SENSOR_COLOR, &color_pixel);
+      if (projected_by_sdk) {
+        pixel_x = color_pixel.x;
+        pixel_y = color_pixel.y;
+      }
+    }
+#endif
+  }
+
+  if (!projected_by_sdk) {
+    // 非 Orbbec 或没有标定参数时使用与简化反投影一致的针孔模型保底。
+    const float fx = static_cast<float>(std::max(frame.color.width, 1));
+    const float fy = static_cast<float>(std::max(frame.color.width, 1));
+    const float cx = static_cast<float>(frame.color.width) * 0.5F;
+    const float cy = static_cast<float>(frame.color.height) * 0.5F;
+    pixel_x = point.x * fx / point.z + cx;
+    pixel_y = point.y * fy / point.z + cy;
+  }
+
+  if (!std::isfinite(pixel_x) || !std::isfinite(pixel_y)) {
+    return false;
+  }
+  const int x = static_cast<int>(std::lround(pixel_x));
+  const int y = static_cast<int>(std::lround(pixel_y));
+  if (x < 0 || y < 0 || x >= frame.color.width || y >= frame.color.height) {
+    return false;
+  }
+  *pixel = ImagePoint{x, y};
+  return true;
 }
 
 void VideoSource::Close() {
@@ -565,7 +623,8 @@ void VideoSource::Close() {
 #endif
 }
 
-bool VideoSource::QueryAlignedDepthPoint(const RgbdFrame& frame, const int pixel_x, const int pixel_y, Point3D* point) const {
+bool VideoSource::QueryAlignedDepthPoint(const RgbdFrame& frame, const int pixel_x, const int pixel_y,
+                                         const int max_search_radius, Point3D* point) const {
   if (point == nullptr || !frame.depth_aligned_to_color || frame.depth_data.empty()) {
     return false;
   }
@@ -576,8 +635,11 @@ bool VideoSource::QueryAlignedDepthPoint(const RgbdFrame& frame, const int pixel
   // 深度图在手部边缘和反光区域容易出现空洞。
   // 从小到大扩大搜索半径，优先使用离查询像素最近的有效深度。
   std::vector<std::uint16_t> depths;
-  static const int radii[] = {2, 5, 10, 15, 25};
+  static const int radii[] = {1, 2, 3, 5, 10, 15, 25};
   for (const int radius : radii) {
+    if (radius > std::max(0, max_search_radius)) {
+      continue;
+    }
     depths.clear();
     for (int dy = -radius; dy <= radius; ++dy) {
       for (int dx = -radius; dx <= radius; ++dx) {

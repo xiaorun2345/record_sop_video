@@ -16,7 +16,9 @@
 #include "config_loader.h"
 #include "geometry_utils.h"
 #include "hand_pose_detector.h"
+#include "hand_skeleton_constraint.h"
 #include "object_tracker.h"
+#include "serial_light_controller.h"
 #include "sop_state_machine.h"
 #include "time_utils.h"
 #include "video_source.h"
@@ -25,13 +27,20 @@
 
 #if RK3588_SOP_HAS_OPENCV
 #include <opencv2/opencv.hpp>
-#endif
 
-#if RK3588_SOP_HAS_OPENCV
-static std::string FormatMs(const double value) {
-  std::ostringstream stream;
-  stream << std::fixed << std::setprecision(1) << value;
-  return stream.str();
+static cv::Mat ResizeForPreview(const cv::Mat& image, const int max_width, const int max_height) {
+  if (image.empty() || max_width <= 0 || max_height <= 0) {
+    return image;
+  }
+  const double scale_w = static_cast<double>(max_width) / static_cast<double>(image.cols);
+  const double scale_h = static_cast<double>(max_height) / static_cast<double>(image.rows);
+  const double scale = std::min(scale_w, scale_h);
+  if (scale <= 0.0 || std::abs(scale - 1.0) < 1e-6) {
+    return image;
+  }
+  cv::Mat preview;
+  cv::resize(image, preview, cv::Size(), scale, scale, cv::INTER_AREA);
+  return preview;
 }
 
 static cv::Mat MakeDisplayImage(const ImageFrame& frame) {
@@ -39,63 +48,126 @@ static cv::Mat MakeDisplayImage(const ImageFrame& frame) {
   return image;
 }
 
-static void DrawRuntimeTimingPanel(ImageFrame* frame, const double yolo_ms, const double yolo_npu_ms,
-                                   const double hand_ms, const double hand_det_npu_ms,
-                                   const double hand_lm_npu_ms, const double crop_ms,
-                                   const double capture_read_ms, const double frame_copy_ms,
-                                   const double spatial_ms, const double state_ms,
-                                   const double draw_ms, const double process_ms) {
-  if (frame == nullptr || frame->bgr_data.empty()) {
+static std::string FormatMs(const double value) {
+  std::ostringstream stream;
+  stream << std::fixed << std::setprecision(1) << value;
+  return stream.str();
+}
+
+static void DrawCheckMark(cv::Mat* image, const cv::Rect& rect, const bool ok) {
+  if (image == nullptr) {
     return;
   }
-  cv::Mat image(frame->height, frame->width, CV_8UC3, frame->bgr_data.data());
-  const int panel_width = std::min(300, std::max(240, frame->width / 3));
-  const int x = std::max(0, frame->width - panel_width - 10);
+  const cv::Scalar color = ok ? cv::Scalar(98, 214, 154) : cv::Scalar(244, 119, 119);
+  cv::rectangle(*image, rect, color, 1);
+  if (ok) {
+    cv::line(*image, cv::Point(rect.x + 3, rect.y + rect.height / 2),
+             cv::Point(rect.x + rect.width / 2 - 1, rect.y + rect.height - 3), color, 2);
+    cv::line(*image, cv::Point(rect.x + rect.width / 2 - 1, rect.y + rect.height - 3),
+             cv::Point(rect.x + rect.width - 3, rect.y + 3), color, 2);
+  } else {
+    cv::line(*image, cv::Point(rect.x + 3, rect.y + 3), cv::Point(rect.x + rect.width - 3, rect.y + rect.height - 3),
+             color, 2);
+    cv::line(*image, cv::Point(rect.x + rect.width - 3, rect.y + 3), cv::Point(rect.x + 3, rect.y + rect.height - 3),
+             color, 2);
+  }
+}
+
+static void DrawStatusPanel(cv::Mat* image, const PerceptionResult& result, const SopStateMachine& state_machine,
+                            const FrameProcessMetrics& metrics) {
+  if (image == nullptr || image->empty()) {
+    return;
+  }
+  (void)result;
+
+  const SopStepConfig* step = state_machine.CurrentStep();
+  const SopStepConfig* checklist_step = step;
+  if (checklist_step == nullptr && !state_machine.steps().empty()) {
+    checklist_step = &state_machine.steps().back();
+  }
+  const bool has_checklist = checklist_step != nullptr && !checklist_step->required_objects.empty();
+
+  static const std::array<std::pair<const char*, double FrameProcessMetrics::*>, 11> timing_rows = {{
+      {"read", &FrameProcessMetrics::read_ms},
+      {"yolo_npu", &FrameProcessMetrics::yolo_npu_ms},
+      {"yolo", &FrameProcessMetrics::object_inference_ms},
+      {"palm_npu", &FrameProcessMetrics::hand_det_npu_ms},
+      {"hand", &FrameProcessMetrics::hand_inference_ms},
+      {"lmk_npu", &FrameProcessMetrics::hand_lm_npu_ms},
+      {"crop", &FrameProcessMetrics::crop_ms},
+      {"3d", &FrameProcessMetrics::spatial_ms},
+      {"state", &FrameProcessMetrics::state_ms},
+      {"draw", &FrameProcessMetrics::draw_ms},
+      {"process", &FrameProcessMetrics::process_ms},
+  }};
+
+  const int timing_rows_count = static_cast<int>(timing_rows.size());
+  const int checklist_rows = has_checklist ? static_cast<int>(checklist_step->required_objects.size()) : 0;
+  const int rows = std::max(timing_rows_count, checklist_rows);
+  const int panel_width = std::min(520, std::max(360, image->cols / 2));
+  const int line_height = 18;
+  const int header_height = 34;
+  const int panel_height = std::min(image->rows - 20, header_height + rows * line_height + 10);
+  if (panel_height <= 0) {
+    return;
+  }
+
+  const int x = std::max(10, image->cols - panel_width - 10);
   const int y = 10;
-  const int line_height = 24;
-  const int panel_height = 11 * line_height + 18;
   const cv::Rect panel_rect(x, y, panel_width, panel_height);
-  const cv::Mat panel_src = image(panel_rect);
+  cv::Mat panel_src = (*image)(panel_rect);
   cv::Mat panel_overlay = panel_src.clone();
   cv::rectangle(panel_overlay, cv::Rect(0, 0, panel_width, panel_height), cv::Scalar(18, 18, 18), -1);
+  cv::rectangle(panel_overlay, cv::Rect(0, 0, panel_width, panel_height), cv::Scalar(80, 80, 80), 1);
 
-  const double hand_npu_ms = hand_det_npu_ms + hand_lm_npu_ms;
-  const double yolo_cpu_ms = std::max(0.0, yolo_ms - yolo_npu_ms);
-  const double hand_cpu_ms = std::max(0.0, hand_ms - hand_npu_ms);
-  const cv::Scalar title_color(255, 255, 255);
-  const cv::Scalar cpu_color(0, 255, 255);
-  const cv::Scalar npu_color(0, 255, 0);
-  const cv::Scalar text_color(230, 230, 230);
+  const bool finished = state_machine.state().finished;
+  cv::putText(panel_overlay, "TIMING / CHECK", cv::Point(12, 22), cv::FONT_HERSHEY_SIMPLEX, 0.52,
+              cv::Scalar(255, 255, 255), 1);
+  if (step != nullptr) {
+    cv::putText(panel_overlay, step->id, cv::Point(panel_width - 110, 22), cv::FONT_HERSHEY_SIMPLEX, 0.5,
+                finished ? cv::Scalar(98, 214, 154) : cv::Scalar(65, 216, 232), 1);
+  }
 
-  int text_y = y + 24;
-  cv::putText(image, "TIMING ms", cv::Point(x + 10, text_y), cv::FONT_HERSHEY_SIMPLEX, 0.62, title_color, 2);
-  text_y += line_height;
-  cv::putText(image, "step", cv::Point(x + 10, text_y), cv::FONT_HERSHEY_SIMPLEX, 0.52, text_color, 1);
-  cv::putText(image, "CPU", cv::Point(x + 112, text_y), cv::FONT_HERSHEY_SIMPLEX, 0.52, cpu_color, 1);
-  cv::putText(image, "NPU", cv::Point(x + 202, text_y), cv::FONT_HERSHEY_SIMPLEX, 0.52, npu_color, 1);
+  cv::putText(panel_overlay, "time", cv::Point(12, 38), cv::FONT_HERSHEY_SIMPLEX, 0.42, cv::Scalar(130, 130, 130), 1);
+  cv::putText(panel_overlay, "check", cv::Point(panel_width - 92, 38), cv::FONT_HERSHEY_SIMPLEX, 0.42,
+              cv::Scalar(130, 130, 130), 1);
 
-  auto draw_line = [&](const std::string& name, const double cpu_ms, const double npu_ms) {
-    text_y += line_height;
-    cv::putText(panel_overlay, name, cv::Point(10, text_y - y), cv::FONT_HERSHEY_SIMPLEX, 0.5, text_color, 1);
-    cv::putText(panel_overlay, FormatMs(cpu_ms), cv::Point(112, text_y - y), cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                cpu_color, 1);
-    cv::putText(panel_overlay, FormatMs(npu_ms), cv::Point(202, text_y - y), cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                npu_color, 1);
-  };
+  const int left_x = 12;
+  const int value_x = 84;
+  const int right_x = panel_width / 2 + 12;
+  const int right_value_x = right_x + 70;
+  int row_y = 56;
+  for (int i = 0; i < rows; ++i) {
+    if (i < timing_rows_count) {
+      const auto& item = timing_rows[static_cast<std::size_t>(i)];
+      cv::putText(panel_overlay, item.first, cv::Point(left_x, row_y), cv::FONT_HERSHEY_SIMPLEX, 0.42,
+                  cv::Scalar(230, 230, 230), 1);
+      const std::string value = FormatMs(metrics.*(item.second));
+      cv::putText(panel_overlay, value, cv::Point(value_x, row_y), cv::FONT_HERSHEY_SIMPLEX, 0.42,
+                  cv::Scalar(65, 216, 232), 1);
+    }
 
-  draw_line("read", capture_read_ms + frame_copy_ms, 0.0);
-  draw_line("yolo", yolo_cpu_ms, yolo_npu_ms);
-  draw_line("hand", hand_cpu_ms, hand_npu_ms);
-  draw_line("palm", 0.0, hand_det_npu_ms);
-  draw_line("lmk", 0.0, hand_lm_npu_ms);
-  draw_line("crop", crop_ms, 0.0);
-  draw_line("3d", spatial_ms, 0.0);
-  draw_line("state", state_ms, 0.0);
-  draw_line("draw", draw_ms, 0.0);
-  draw_line("process", process_ms, yolo_npu_ms + hand_npu_ms);
+    if (has_checklist && i < checklist_rows) {
+      const RequiredObjectConfig& required_object = checklist_step->required_objects[static_cast<std::size_t>(i)];
+      int current_count = CountObjectLabel(result.objects, required_object.label);
+      const std::vector<int>& max_counts = state_machine.state().required_object_max_counts;
+      const std::size_t checklist_index = static_cast<std::size_t>(i);
+      if (checklist_index < max_counts.size()) {
+        current_count = std::max(current_count, max_counts[checklist_index]);
+      }
+      const bool satisfied = current_count >= required_object.min_count;
+      DrawCheckMark(&panel_overlay, cv::Rect(right_x, row_y - 11, 12, 12), satisfied);
+      const cv::Scalar text_color = satisfied ? cv::Scalar(98, 214, 154) : cv::Scalar(244, 119, 119);
+      const std::string line_text = required_object.label + " " + std::to_string(current_count) + "/" +
+                                    std::to_string(required_object.min_count);
+      cv::putText(panel_overlay, line_text, cv::Point(right_value_x, row_y), cv::FONT_HERSHEY_SIMPLEX, 0.4,
+                  text_color, 1);
+    }
 
-  cv::addWeighted(panel_overlay, 0.58, panel_src, 0.42, 0.0, panel_src);
-  cv::rectangle(panel_src, cv::Rect(0, 0, panel_width, panel_height), cv::Scalar(80, 80, 80), 1);
+    row_y += line_height;
+  }
+
+  cv::addWeighted(panel_overlay, 0.62, panel_src, 0.38, 0.0, panel_src);
 }
 #endif
 
@@ -248,9 +320,9 @@ static bool QueryPalmPosition3D(const RgbdFrame& rgbd_frame, const VideoSource& 
  *
  * 约定很简单：
  *   - 物体用检测框中心点取深度。
- *   - 手部同时查询 wrist 和 palm，画面显示使用 palm。
+ *   - 手部查询 21 个关键点、wrist 和 palm，关键点使用小邻域避免取到背景。
  *
- * 这样做的优点是采样点固定、逻辑稳定、调试时容易对照画面。
+ * 这里只负责原始三维观测，不在这里保存历史或执行骨骼约束。
  */
 void FillSpatialPosition(const RgbdFrame& rgbd_frame, const VideoSource& source, PerceptionResult* result) {
   if (result == nullptr) {
@@ -266,10 +338,18 @@ void FillSpatialPosition(const RgbdFrame& rgbd_frame, const VideoSource& source,
     if (hand.landmarks.empty()) {
       continue;
     }
-    const HandLandmark& wrist = hand.landmarks[0];
-    const int x = static_cast<int>(wrist.x * static_cast<float>(rgbd_frame.color.width));
-    const int y = static_cast<int>(wrist.y * static_cast<float>(rgbd_frame.color.height));
-    source.QueryPoint3D(rgbd_frame, x, y, &hand.wrist_position);
+    // 21 个关键点逐点查询真实深度。手指使用小邻域，避免深度空洞时取到远处背景。
+    const std::size_t joint_count = std::min(hand.landmarks.size(), hand.joints_3d.size());
+    for (std::size_t joint_index = 0; joint_index < joint_count; ++joint_index) {
+      ImagePoint pixel;
+      Point3D measured_position;
+      if (LandmarkToPixel(hand, static_cast<int>(joint_index), rgbd_frame.color.width,
+                          rgbd_frame.color.height, &pixel)) {
+        source.QueryPoint3D(rgbd_frame, pixel.x, pixel.y, 3, &measured_position);
+      }
+      hand.joints_3d[joint_index].measured_position = measured_position;
+    }
+    hand.wrist_position = hand.joints_3d[0].measured_position;
     ImagePoint palm_center;
     if (GetPalmCenterPixel(hand, rgbd_frame.color.width, rgbd_frame.color.height, &palm_center)) {
       // 保存手心二维点，保证画图和查询深度使用同一个像素坐标。
@@ -281,22 +361,41 @@ void FillSpatialPosition(const RgbdFrame& rgbd_frame, const VideoSource& source,
 }
 
 /**
+ * @brief 把约束后的 21 个三维关节投影回当前彩色图。
+ */
+static void ProjectConstrainedHands(const RgbdFrame& rgbd_frame, const VideoSource& source,
+                                    std::vector<HandPose>* hands) {
+  if (hands == nullptr) {
+    return;
+  }
+  for (HandPose& hand : *hands) {
+    for (HandJoint3D& joint : hand.joints_3d) {
+      joint.projected_pixel_valid = source.ProjectPointToColor(
+          rgbd_frame, joint.constrained_position, &joint.projected_pixel);
+    }
+  }
+}
+
+/**
  * @brief 处理单帧 SOP 流程。
  *
  * 这一段是“主链路”：
  *   1. 同一帧图像分别送入物体检测和手部检测。
- *   2. 用深度图补 3D 坐标。
- *   3. 把感知结果交给状态机判断步骤是否推进。
- *   4. 把结果交给可视化和日志输出。
+ *   2. 用深度图补充目标和手部 21 点的原始 3D 坐标。
+ *   3. 执行手部骨骼约束，并把约束后三维点投影回彩色图。
+ *   4. 把感知结果交给状态机判断步骤是否推进。
+ *   5. 把结果交给可视化和日志输出。
  *
  * 函数保持在 main.cpp 里，而没有再拆成多个对象，是因为这里本质上是控制流编排，
  * 过度封装会让你在 RK3588 现场排查时来回跳文件。
  */
 bool ProcessFrame(RgbdFrame* rgbd_frame, const VideoSource& source, Yolov8Detector* detector,
-                  HandPoseDetector* hand_detector, ObjectTracker* object_tracker, SopStateMachine* state_machine,
-                  const Visualizer& visualizer) {
+                  HandPoseDetector* hand_detector, HandSkeletonConstraint* hand_skeleton_constraint,
+                  ObjectTracker* object_tracker, SopStateMachine* state_machine,
+                  SerialLightController* serial_light, const Visualizer& visualizer,
+                  FrameProcessMetrics* metrics) {
   if (rgbd_frame == nullptr || detector == nullptr || hand_detector == nullptr || object_tracker == nullptr ||
-      state_machine == nullptr) {
+      hand_skeleton_constraint == nullptr || state_machine == nullptr) {
     return false;
   }
 
@@ -307,22 +406,30 @@ bool ProcessFrame(RgbdFrame* rgbd_frame, const VideoSource& source, Yolov8Detect
 
   std::vector<ObjectDetection> objects;
   std::vector<HandPose> hands;
-  const std::chrono::steady_clock::time_point frame_begin = std::chrono::steady_clock::now();
+  const auto process_begin = std::chrono::steady_clock::now();
 
   // 两个 RKNN context 串行执行，避免 YOLO 和手部模型同时抢同一个 NPU 队列。
-  const std::chrono::steady_clock::time_point object_begin = std::chrono::steady_clock::now();
+  const auto yolo_begin = std::chrono::steady_clock::now();
   const bool object_ok = detector->Detect(rgbd_frame->color, &objects);
-  const std::chrono::steady_clock::time_point object_end = std::chrono::steady_clock::now();
+  if (metrics != nullptr) {
+    metrics->object_inference_ms = std::chrono::duration<double, std::milli>(
+                                      std::chrono::steady_clock::now() - yolo_begin)
+                                      .count();
+    metrics->yolo_npu_ms = static_cast<double>(detector->last_rknn_run_us()) / 1000.0;
+  }
   BoundingBox hand_crop_box{0, 0, rgbd_frame->color.width, rgbd_frame->color.height};
-  const std::chrono::steady_clock::time_point crop_begin = std::chrono::steady_clock::now();
+  const auto crop_begin = std::chrono::steady_clock::now();
   ImageFrame hand_frame = MakeHandDetectionFrame(rgbd_frame->color, &hand_crop_box);
-  const std::chrono::steady_clock::time_point crop_end = std::chrono::steady_clock::now();
-  const std::chrono::steady_clock::time_point hand_begin = std::chrono::steady_clock::now();
+  const auto crop_end = std::chrono::steady_clock::now();
+  const auto hand_begin = std::chrono::steady_clock::now();
   const bool hand_ok = hand_detector->Detect(hand_frame, &hands);
-  const std::chrono::steady_clock::time_point hand_end = std::chrono::steady_clock::now();
-
-  result.object_inference_ms = std::chrono::duration<double, std::milli>(object_end - object_begin).count();
-  result.hand_inference_ms = std::chrono::duration<double, std::milli>(hand_end - hand_begin).count();
+  if (metrics != nullptr) {
+    metrics->crop_ms = std::chrono::duration<double, std::milli>(crop_end - crop_begin).count();
+    metrics->hand_inference_ms = std::chrono::duration<double, std::milli>(
+                                     std::chrono::steady_clock::now() - hand_begin).count();
+    metrics->hand_det_npu_ms = static_cast<double>(hand_detector->last_detector_rknn_run_us()) / 1000.0;
+    metrics->hand_lm_npu_ms = static_cast<double>(hand_detector->last_landmark_rknn_run_us()) / 1000.0;
+  }
   result.synchronized = object_ok && hand_ok;
   if (!object_ok) {
     std::cerr << "YOLOv8 检测失败" << std::endl;
@@ -335,86 +442,50 @@ bool ProcessFrame(RgbdFrame* rgbd_frame, const VideoSource& source, Yolov8Detect
   RemapHandsFromCrop(hand_crop_box, rgbd_frame->color.width, rgbd_frame->color.height, &hands);
   object_tracker->Update(&objects);
 
+  const auto spatial_begin = std::chrono::steady_clock::now();
   result.objects = std::move(objects);
   result.hands = std::move(hands);
 
-  const std::chrono::steady_clock::time_point spatial_begin = std::chrono::steady_clock::now();
   FillSpatialPosition(*rgbd_frame, source, &result);
-  const std::chrono::steady_clock::time_point spatial_end = std::chrono::steady_clock::now();
-  const std::chrono::steady_clock::time_point state_begin = std::chrono::steady_clock::now();
+  hand_skeleton_constraint->Update(result.timestamp_sec, &result.hands);
+  ProjectConstrainedHands(*rgbd_frame, source, &result.hands);
+  if (metrics != nullptr) {
+    metrics->spatial_ms = std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - spatial_begin)
+                               .count();
+  }
+
+  const auto state_begin = std::chrono::steady_clock::now();
   state_machine->Update(result);
-  const std::chrono::steady_clock::time_point state_end = std::chrono::steady_clock::now();
-  const std::chrono::steady_clock::time_point draw_begin = std::chrono::steady_clock::now();
+  if (metrics != nullptr) {
+    metrics->state_ms = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - state_begin)
+                             .count();
+  }
+
+  const auto draw_begin = std::chrono::steady_clock::now();
   visualizer.Draw(&rgbd_frame->color, result, *state_machine);
-  const std::chrono::steady_clock::time_point draw_end = std::chrono::steady_clock::now();
-  const std::chrono::steady_clock::time_point frame_end = std::chrono::steady_clock::now();
-
-  const double crop_ms = std::chrono::duration<double, std::milli>(crop_end - crop_begin).count();
-  const double spatial_ms = std::chrono::duration<double, std::milli>(spatial_end - spatial_begin).count();
-  const double state_ms = std::chrono::duration<double, std::milli>(state_end - state_begin).count();
-  const double draw_ms = std::chrono::duration<double, std::milli>(draw_end - draw_begin).count();
-  const double process_ms = std::chrono::duration<double, std::milli>(frame_end - frame_begin).count();
-  const double yolo_npu_ms = static_cast<double>(detector->last_rknn_run_us()) / 1000.0;
-  const double hand_det_npu_ms = static_cast<double>(hand_detector->last_detector_rknn_run_us()) / 1000.0;
-  const double hand_lm_npu_ms = static_cast<double>(hand_detector->last_landmark_rknn_run_us()) / 1000.0;
-
 #if RK3588_SOP_HAS_OPENCV
-  DrawRuntimeTimingPanel(&rgbd_frame->color, result.object_inference_ms, yolo_npu_ms,
-                         result.hand_inference_ms, hand_det_npu_ms, hand_lm_npu_ms,
-                         crop_ms, source.last_capture_read_ms(), source.last_frame_copy_ms(),
-                         spatial_ms, state_ms, draw_ms, process_ms);
+  if (metrics != nullptr && !rgbd_frame->color.bgr_data.empty()) {
+    cv::Mat image = MakeDisplayImage(rgbd_frame->color);
+    DrawStatusPanel(&image, result, *state_machine, *metrics);
+  }
 #endif
+  if (metrics != nullptr) {
+    metrics->draw_ms = std::chrono::duration<double, std::milli>(
+                           std::chrono::steady_clock::now() - draw_begin)
+                           .count();
+    metrics->process_ms = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - process_begin)
+                              .count();
+  }
 
-  const SopStepConfig* step = state_machine->CurrentStep();
-  std::cout << "frame=" << rgbd_frame->color.frame_id;
-  if (step != nullptr) {
-    std::cout << ", step=" << step->id;
-  } else {
-    std::cout << ", perception_mode";
+  const bool two_hands_alert = result.hands.size() >= 2;
+  if (serial_light != nullptr) {
+    serial_light->SetAlert(two_hands_alert);
   }
-  std::cout << ", objects=" << result.objects.size() << ", hands=" << result.hands.size()
-            << ", yolo_ms=" << result.object_inference_ms << ", hand_ms=" << result.hand_inference_ms;
-  if (detector->last_rknn_run_us() > 0) {
-    std::cout << ", rknn_run_ms=" << yolo_npu_ms;
-  }
-  if (hand_detector->last_detector_rknn_run_us() > 0) {
-    std::cout << ", hand_det_rknn_ms=" << hand_det_npu_ms;
-  }
-  if (hand_detector->last_landmark_rknn_run_us() > 0) {
-    std::cout << ", hand_lm_rknn_ms=" << hand_lm_npu_ms;
-  }
-  std::cout << ", crop_ms=" << crop_ms
-            << ", crop_box=" << hand_crop_box.x << "/" << hand_crop_box.y << "/"
-            << hand_crop_box.width << "x" << hand_crop_box.height
-            << ", cap_read_ms=" << source.last_capture_read_ms()
-            << ", color_convert_ms=" << source.last_color_convert_ms()
-            << ", frame_copy_ms=" << source.last_frame_copy_ms()
-            << ", spatial_ms=" << spatial_ms << ", state_ms=" << state_ms
-            << ", draw_ms=" << draw_ms << ", process_ms=" << process_ms;
-  if (!result.objects.empty() && result.objects.front().position.valid) {
-    std::cout << ", object_z=" << result.objects.front().position.z;
-  }
-  if (!result.hands.empty() && result.hands.front().wrist_position.valid) {
-    std::cout << ", wrist_z=" << result.hands.front().wrist_position.z;
-  }
-  if (!result.hands.empty()) {
-    const HandPose& hand = result.hands.front();
-    // 现场排查手心 3D 时，同时打印二维落点和深度查询状态。
-    if (hand.palm_pixel_valid) {
-      std::cout << ", palm_xy=" << hand.palm_pixel.x << "/" << hand.palm_pixel.y;
-    }
-    if (hand.palm_position.valid) {
-      std::cout << ", palm_z=" << hand.palm_position.z;
-    } else {
-      std::cout << ", palm_depth=invalid";
-    }
-  }
-  std::cout << ", depth_aligned=" << (result.depth_aligned_to_color ? "true" : "false");
-  std::cout << std::endl;
-
-  const std::vector<SopAlert>& alerts = state_machine->state().alerts;
-  for (const SopAlert& alert : alerts) {
-    std::cout << "[" << alert.level << "] " << alert.step_id << ": " << alert.message << std::endl;
+  if (two_hands_alert) {
+    std::cout << "[warning] two_hands: 检测到 2 个手部目标，触发串口报警灯" << std::endl;
   }
   return true;
 }
@@ -441,10 +512,6 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // 当前先跑通 YOLO + 手部关键点，不启用 SOP 步骤和 ROI 约束。
-  config.steps.clear();
-  config.rois.clear();
-
   Yolov8Detector detector(config.detector);
   HandPoseDetector hand_detector(config.hand_pose);
   if (!detector.Init() || !hand_detector.Init()) {
@@ -453,8 +520,17 @@ int main(int argc, char** argv) {
 
   SopStateMachine state_machine(config.steps);
   ObjectTracker object_tracker;
+  HandSkeletonConstraint hand_skeleton_constraint(config.hand_skeleton);
   state_machine.Reset(NowInSeconds());
   Visualizer visualizer;
+  SerialLightController serial_light(config.serial_light.device_path, config.serial_light.baud_rate);
+  SerialLightController* serial_light_ptr = nullptr;
+  if (config.serial_light.enabled) {
+    serial_light_ptr = &serial_light;
+    if (!serial_light.Open()) {
+      std::cerr << "串口报警灯不可用，SOP 主流程继续运行" << std::endl;
+    }
+  }
   bool show_window = config.show_window;
   bool state_initialized_from_frame = false;
 
@@ -494,40 +570,34 @@ int main(int argc, char** argv) {
 #endif
 
   while (!state_machine.state().finished) {
-    const std::chrono::steady_clock::time_point loop_begin = std::chrono::steady_clock::now();
     RgbdFrame frame;
-    const std::chrono::steady_clock::time_point read_begin = std::chrono::steady_clock::now();
     if (!source.ReadRgbd(&frame)) {
       break;
     }
-    const std::chrono::steady_clock::time_point read_end = std::chrono::steady_clock::now();
     if (!state_initialized_from_frame) {
       state_machine.Reset(frame.color.timestamp_sec);
       state_initialized_from_frame = true;
     }
 
-    if (!ProcessFrame(&frame, source, &detector, &hand_detector, &object_tracker, &state_machine, visualizer)) {
+    FrameProcessMetrics metrics;
+    if (source.last_capture_read_ms() > 0.0) {
+      metrics.read_ms = source.last_capture_read_ms() + source.last_color_convert_ms() + source.last_frame_copy_ms();
+    }
+    if (!ProcessFrame(&frame, source, &detector, &hand_detector, &hand_skeleton_constraint,
+                      &object_tracker, &state_machine, serial_light_ptr, visualizer, &metrics)) {
       break;
     }
 
 #if RK3588_SOP_HAS_OPENCV
-    double show_ms = 0.0;
-    double wait_ms = 0.0;
-    double write_ms = 0.0;
     if (show_window && !frame.color.bgr_data.empty()) {
       cv::Mat image = MakeDisplayImage(frame.color);
       try {
-        const std::chrono::steady_clock::time_point show_begin = std::chrono::steady_clock::now();
-        cv::imshow("rk3588_sop", image);
-        const std::chrono::steady_clock::time_point show_end = std::chrono::steady_clock::now();
+        cv::Mat preview = ResizeForPreview(image, 1280, 720);
+        cv::imshow("rk3588_sop", preview);
         const int wait_delay_ms = 1;
-        const std::chrono::steady_clock::time_point wait_begin = std::chrono::steady_clock::now();
         if (cv::waitKey(wait_delay_ms) == 27) {
           break;
         }
-        const std::chrono::steady_clock::time_point wait_end = std::chrono::steady_clock::now();
-        show_ms = std::chrono::duration<double, std::milli>(show_end - show_begin).count();
-        wait_ms = std::chrono::duration<double, std::milli>(wait_end - wait_begin).count();
       } catch (const cv::Exception& error) {
         std::cerr << "窗口显示不可用，自动切换为无窗口日志模式: " << error.what() << std::endl;
         show_window = false;
@@ -535,21 +605,12 @@ int main(int argc, char** argv) {
     }
     if (config.save_video && writer.isOpened() && !frame.color.bgr_data.empty()) {
       cv::Mat image = MakeDisplayImage(frame.color);
-      const std::chrono::steady_clock::time_point write_begin = std::chrono::steady_clock::now();
       writer.write(image);
-      const std::chrono::steady_clock::time_point write_end = std::chrono::steady_clock::now();
-      write_ms = std::chrono::duration<double, std::milli>(write_end - write_begin).count();
     }
-    const std::chrono::steady_clock::time_point loop_end = std::chrono::steady_clock::now();
-    std::cout << "frame_io=" << frame.color.frame_id
-              << ", read_total_ms=" << std::chrono::duration<double, std::milli>(read_end - read_begin).count()
-              << ", show_ms=" << show_ms << ", wait_ms=" << wait_ms
-              << ", write_ms=" << write_ms
-              << ", loop_total_ms=" << std::chrono::duration<double, std::milli>(loop_end - loop_begin).count()
-              << std::endl;
 #endif
   }
 
   source.Close();
+  serial_light.TurnOff();
   return state_machine.state().finished ? 0 : 2;
 }

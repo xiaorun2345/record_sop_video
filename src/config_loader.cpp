@@ -99,6 +99,10 @@ static bool ParseRoiValue(const std::string& value, RoiRegion* roi) {
  * @brief 解析 SOP 步骤配置。
  *
  * 格式示例：id|name|required_objects|hand_roi|min_frames|timeout|warning|optional_distance
+ *
+ * required_objects 支持两种写法：
+ *   - base,frame
+ *   - cover_cloth:1,padding_board:2
  */
 static bool ParseStepValue(const std::string& value, SopStepConfig* step) {
   const std::vector<std::string> parts = SplitText(value, '|');
@@ -107,7 +111,24 @@ static bool ParseStepValue(const std::string& value, SopStepConfig* step) {
   }
   step->id = parts[0];
   step->name = parts[1];
-  step->required_objects = SplitText(parts[2], ',');
+  step->required_objects.clear();
+  for (const std::string& item : SplitText(parts[2], ',')) {
+    const std::vector<std::string> object_parts = SplitText(item, ':');
+    RequiredObjectConfig required_object;
+    if (object_parts.size() == 1) {
+      required_object.label = object_parts[0];
+      required_object.min_count = 1;
+    } else if (object_parts.size() == 2) {
+      required_object.label = object_parts[0];
+      required_object.min_count = std::stoi(object_parts[1]);
+    } else {
+      return false;
+    }
+    if (required_object.label.empty() || required_object.min_count <= 0) {
+      return false;
+    }
+    step->required_objects.push_back(required_object);
+  }
   step->hand_roi = parts[3];
   step->min_confirm_frames = std::stoi(parts[4]);
   step->timeout_sec = std::stod(parts[5]);
@@ -118,7 +139,7 @@ static bool ParseStepValue(const std::string& value, SopStepConfig* step) {
   if (parts.size() >= 9) {
     step->min_stage_sec = std::stod(parts[8]);
   }
-  return !step->id.empty() && !step->name.empty();
+  return !step->id.empty() && !step->name.empty() && !step->required_objects.empty();
 }
 
 bool ConfigLoader::Load(const std::string& file_path, SopAppConfig* config) const {
@@ -176,6 +197,33 @@ bool ConfigLoader::Load(const std::string& file_path, SopAppConfig* config) cons
   config->hand_pose.max_num_hands = std::stoi(kv["hand.max_num_hands"]);
   config->hand_pose.min_detection_confidence = std::stof(kv["hand.min_detection_confidence"]);
   config->hand_pose.min_tracking_confidence = std::stof(kv["hand.min_tracking_confidence"]);
+
+  // 骨骼约束配置保持可选，旧配置文件不增加字段也能继续运行。
+  if (kv.count("hand.constraint.enabled") > 0) {
+    config->hand_skeleton.enabled = ParseBoolValue(kv["hand.constraint.enabled"]);
+  }
+  if (kv.count("hand.constraint.calibration_frames") > 0) {
+    config->hand_skeleton.calibration_frames =
+        std::max(5, std::stoi(kv["hand.constraint.calibration_frames"]));
+  }
+  if (kv.count("hand.constraint.smoothing") > 0) {
+    config->hand_skeleton.smoothing =
+        std::max(0.0F, std::min(1.0F, std::stof(kv["hand.constraint.smoothing"])));
+  }
+  if (kv.count("hand.constraint.max_prediction_frames") > 0) {
+    config->hand_skeleton.max_prediction_frames =
+        std::max(0, std::stoi(kv["hand.constraint.max_prediction_frames"]));
+  }
+
+  if (kv.count("serial_light.enabled") > 0) {
+    config->serial_light.enabled = ParseBoolValue(kv["serial_light.enabled"]);
+  }
+  if (kv.count("serial_light.device_path") > 0) {
+    config->serial_light.device_path = kv["serial_light.device_path"];
+  }
+  if (kv.count("serial_light.baud_rate") > 0) {
+    config->serial_light.baud_rate = std::stoi(kv["serial_light.baud_rate"]);
+  }
 
   config->show_window = ParseBoolValue(kv["show_window"]);
   config->save_video = ParseBoolValue(kv["save_video"]);

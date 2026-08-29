@@ -47,6 +47,16 @@ bool HasObjectLabel(const std::vector<ObjectDetection>& objects, const std::stri
   return false;
 }
 
+int CountObjectLabel(const std::vector<ObjectDetection>& objects, const std::string& label) {
+  int count = 0;
+  for (const ObjectDetection& object : objects) {
+    if (object.label == label) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 bool HasHandInRoi(const std::vector<HandPose>& hands, const RoiRegion& roi, const int image_width, const int image_height) {
   // 手部关键点归一化坐标转成图像像素坐标后再做 ROI 判断。
   // 这里只看 wrist 点，因为 SOP 里最关心的是“手是否进入工位区域”。

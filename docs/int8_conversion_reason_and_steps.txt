@@ -1,0 +1,158 @@
+RK3588 YOLOv8 INT8 无法识别原因和重新转换步骤
+
+问题现象
+========
+
+当前 FP16 模型可以识别：
+
+  models/ai_sop_best_fp16.rknn
+
+但当前 INT8 模型完全无法识别，推理能运行，检测结果一直是 0：
+
+  models/ai_sop_best.rknn
+  models/yolov8.rknn
+
+
+根本原因
+========
+
+当前不可用的 INT8 模型是普通 YOLOv8 单输出结构：
+
+  output dims = 1 x 11 x 8400
+
+其中 11 表示：
+
+  4 个 box 坐标字段 + 7 个类别分数字段
+
+也就是同一个输出 tensor 同时存：
+
+  [cx, cy, w, h, class0, class1, ... class6]
+
+box 坐标的数值范围大约是 0..640，类别分数的数值范围大约是 0..1。
+做 INT8 量化时，这两类数值共用同一个输出量化 scale。
+
+已记录到的坏模型属性是：
+
+  RKNN output attr[0]: dims=1x11x8400, type=INT8, zp=-127, scale=2.50872
+
+scale=2.50872 对 0..640 的 box 坐标还能勉强表达，但对 0..1 的类别分数太粗。
+类别分数被 INT8 量化后基本丢失，反量化出来通常低于 detector.conf_threshold。
+
+所以后处理会把所有候选框过滤掉，表现为：
+
+  推理正常运行，但 objects=0，完全无法识别。
+
+这不是 C++ 后处理阈值设置的问题，也不是 FP16 和 INT8 预处理不一致的问题。
+核心问题是：不能把普通单输出 YOLOv8 ONNX 直接量化成 INT8 RKNN。
+
+
+必须采用的 INT8 转换路线
+========================
+
+必须从原始 .pt 权重重新导出 RKNN 优化版 ONNX，输出要拆成多输出结构。
+
+推荐输出结构是 9 个输出：
+
+  [box_0, cls_0, score_0,
+   box_1, cls_1, score_1,
+   box_2, cls_2, score_2]
+
+这样 box 分支和 class/score 分支可以各自使用合适的量化 scale。
+类别分数 0..1 不会再被 box 坐标 0..640 的量化范围压坏。
+
+本仓库里的 C++ 后处理已经支持这种 9 输出 RKNN YOLOv8 格式。
+
+
+不要这样做
+==========
+
+不要直接把下面这个普通 ONNX 做 INT8 量化：
+
+  models/ai_sop_best.onnx
+
+除非它已经是 RKNN 优化版 split-output ONNX。
+否则会再次生成“能推理但识别为 0”的 INT8 模型。
+
+
+在转换机器上需要的输入
+======================
+
+需要准备：
+
+  1. 训练得到的 PyTorch 权重：
+
+       models/ai_sop_best.pt
+
+  2. 本仓库：
+
+       rk3588_sop
+
+  3. RKNN Toolkit2 环境：
+
+       from rknn.api import RKNN
+
+  4. patched Rockchip Ultralytics 依赖环境：
+
+       third_party/ultralytics_yolov8_rknn
+
+
+在转换机器上执行
+================
+
+进入仓库根目录：
+
+  cd /path/to/rk3588_sop
+
+第一步：从 .pt 导出 RKNN 优化版 ONNX：
+
+  python3 scripts/export_ai_sop_rknnopt_onnx.py \
+    --weights models/ai_sop_best.pt \
+    --output models/ai_sop_best_rknnopt.onnx
+
+第二步：把 RKNN 优化版 ONNX 转成 INT8 RKNN：
+
+  python3 scripts/export_ai_sop_rknn_int8.py \
+    --onnx models/ai_sop_best_rknnopt.onnx \
+    --output models/ai_sop_best_int8.rknn \
+    --dataset models/calibration/dataset.txt
+
+注意：export_ai_sop_rknn_int8.py 会拒绝直接量化普通单输出 ONNX。
+如果传入 models/ai_sop_best.onnx，脚本会报错，这是故意的保护。
+
+
+转换完成后的配置
+================
+
+把 config/sop_config.txt 里的模型路径改成：
+
+  detector.model_path=models/ai_sop_best_int8.rknn
+
+类别保持当前 7 类：
+
+  detector.labels=cover_cloth,long_handle,manual,padding_board,small_red_lever,top_pad,vertical_support_bracket
+
+
+转换后验收标准
+==============
+
+启动程序时确认 RKNN 输出属性不是单个 1x11x8400 INT8 大 scale 输出。
+
+理想情况应该看到多个输出，例如 9 个输出：
+
+  outputs=9
+
+并且 class/score 分支的量化 scale 应该适合 0..1 分数范围。
+
+运行视频或相机后，objects 不应长期为 0。
+
+
+给转换机器上的 Codex 的任务描述
+===============================
+
+可以直接对转换机器上的 Codex 说：
+
+  我必须使用 INT8 RKNN。当前普通单输出 YOLOv8 INT8 会因为 box 坐标和类别分数共用 scale 导致类别分数量化丢失。
+  请不要直接量化 models/ai_sop_best.onnx。
+  请从 models/ai_sop_best.pt 使用 scripts/export_ai_sop_rknnopt_onnx.py 导出 models/ai_sop_best_rknnopt.onnx，
+  然后使用 scripts/export_ai_sop_rknn_int8.py 转成 models/ai_sop_best_int8.rknn。
+  转换后检查 RKNN 输出应为 box/class/score 分离的多输出结构，而不是单个 1x11x8400 INT8 输出。

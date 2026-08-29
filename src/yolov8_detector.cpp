@@ -11,6 +11,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 
 #if RK3588_SOP_HAS_OPENCV
 #include <opencv2/opencv.hpp>
@@ -373,6 +374,28 @@ bool Yolov8Detector::InitRknn() {
               << ", qnt=" << rknn_output_attrs_[i].qnt_type << ", zp=" << rknn_output_attrs_[i].zp
               << ", scale=" << rknn_output_attrs_[i].scale << std::endl;
   }
+  if (rknn_output_attrs_.size() == 1U) {
+    const rknn_tensor_attr& output_attr = rknn_output_attrs_.front();
+    std::vector<int> dims;
+    for (std::uint32_t d = 0; d < output_attr.n_dims; ++d) {
+      if (output_attr.dims[d] > 1) {
+        dims.push_back(output_attr.dims[d]);
+      }
+    }
+    const int class_count = static_cast<int>(config_.labels.size());
+    const int yolov8_fields = 4 + class_count;
+    const int yolov8_fields_with_objectness = 5 + class_count;
+    const bool yolov8_single_output =
+        std::find(dims.begin(), dims.end(), yolov8_fields) != dims.end() ||
+        std::find(dims.begin(), dims.end(), yolov8_fields_with_objectness) != dims.end();
+    const bool quantized_output =
+        output_attr.type == RKNN_TENSOR_INT8 || output_attr.type == RKNN_TENSOR_UINT8;
+    if (yolov8_single_output && quantized_output && output_attr.scale > 1.0F) {
+      std::cerr << "警告: 当前 YOLOv8 RKNN 是单输出量化模型，output scale=" << output_attr.scale
+                << "。框坐标和类别概率共用同一个 INT8 量化尺度，0~1 的类别分数很可能被量化成 0；"
+                << "建议重新导出 FP16/non-quantized RKNN，或把检测头导出成框/分类分离输出。" << std::endl;
+    }
+  }
   return true;
 }
 
@@ -527,6 +550,7 @@ bool Yolov8Detector::DecodeRknnOutputs(const std::vector<rknn_output>& outputs, 
   }
 
   std::vector<ObjectDetection> merged;
+  const bool debug_yolo = std::getenv("RK3588_SOP_DEBUG_YOLO") != nullptr;
   for (std::size_t i = 0; i < outputs.size(); ++i) {
     const rknn_output& output = outputs[i];
     const rknn_tensor_attr& attr = rknn_output_attrs_[i];
@@ -558,6 +582,49 @@ bool Yolov8Detector::DecodeRknnOutputs(const std::vector<rknn_output>& outputs, 
         !ResolveOutputLayout(count, dims, item_with_objectness, &rows, &cols, &transposed)) {
       std::cerr << "暂不支持的 YOLOv8 输出形状, output=" << i << ", floats=" << count << std::endl;
       continue;
+    }
+    if (debug_yolo) {
+      const int item_size = cols;
+      const int candidate_count = rows;
+      float row_major_best = -std::numeric_limits<float>::infinity();
+      int row_major_best_row = -1;
+      int row_major_best_class = -1;
+      if (count >= candidate_count * item_size) {
+        for (int row = 0; row < candidate_count; ++row) {
+          const float* pred = data + row * item_size;
+          for (int c = 0; c < class_count; ++c) {
+            const float score = pred[4 + c];
+            if (score > row_major_best) {
+              row_major_best = score;
+              row_major_best_row = row;
+              row_major_best_class = c;
+            }
+          }
+        }
+      }
+
+      float channel_major_best = -std::numeric_limits<float>::infinity();
+      int channel_major_best_row = -1;
+      int channel_major_best_class = -1;
+      if (count >= candidate_count * item_size) {
+        for (int row = 0; row < candidate_count; ++row) {
+          for (int c = 0; c < class_count; ++c) {
+            const float score = data[static_cast<std::size_t>(4 + c) * static_cast<std::size_t>(candidate_count) +
+                                     static_cast<std::size_t>(row)];
+            if (score > channel_major_best) {
+              channel_major_best = score;
+              channel_major_best_row = row;
+              channel_major_best_class = c;
+            }
+          }
+        }
+      }
+
+      std::cerr << "YOLO layout debug: output=" << i << ", count=" << count << ", rows=" << rows
+                << ", cols=" << cols << ", transposed=" << transposed
+                << ", row_major_best=" << row_major_best << "@row" << row_major_best_row << "/class"
+                << row_major_best_class << ", channel_major_best=" << channel_major_best << "@row"
+                << channel_major_best_row << "/class" << channel_major_best_class << std::endl;
     }
 
     std::vector<ObjectDetection> decoded;
