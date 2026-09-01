@@ -43,3 +43,8 @@ python ./ultralytics/engine/exporter.py
 
 请参考 https://github.com/airockchip/rknn_model_zoo
 
+
+## AI-SOP 专用导出
+
+当前 SOP 工程使用的是 `ai_sop_best.pt -> ai_sop_best_rknnopt.onnx -> ai_sop_best_int8.rknn` 这条链路。
+请使用仓库内的 `scripts/export_ai_sop_rknnopt_onnx.py` 和 `scripts/export_ai_sop_rknn_int8.py`，不要再走旧的 `ai_sop_best.rknn` 路线。

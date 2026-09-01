@@ -10,6 +10,18 @@
 
 关于如何导出适配 RKNPU 分割/检测/姿态/旋转框 模型，请参考 [RKOPT_README_CN.md](RKOPT_README_CN.md), 该优化只在导出模型时生效，训练代码按照原仓库的指引即可。
 
+#### AI-SOP 导出入口
+
+如果你要导出当前 SOP 训练用的模型，请只走这两步：
+
+```bash
+cd /home/user/toolchains/record_sop_video/third_party/ultralytics_yolov8_rknn
+python scripts/export_ai_sop_rknnopt_onnx.py
+python scripts/export_ai_sop_rknn_int8.py
+```
+
+生成结果分别是 `models/ai_sop_best_rknnopt.onnx` 和 `models/ai_sop_best_int8.rknn`。
+
 ---
 
 <div>
