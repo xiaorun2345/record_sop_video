@@ -79,6 +79,7 @@
     <footer>© 2025 DenseAI. All rights reserved.<span>版本：v1.2.0</span></footer>
   </main>
   <div class="alarm" id="alarm"><span>⚠</span><div><b>报警中 · 连接器未检测到</b><small>声光报警剩余 <em id="alarm-count">5</em> 秒</small></div><button id="dismiss-alarm">立即关闭</button></div>
-  <script src="app.js"></script>
+  <script src="app.js" defer></script>
+  <div id="recordings-dialog" class="recordings-dialog" hidden><div class="recordings-panel"><div class="card-heading"><h3>录像列表</h3><button id="recordings-close" class="dialog-close">×</button></div><p id="recordings-empty" class="hint">正在加载…</p><ul id="recordings-list"></ul></div></div>
 </body>
 </html>

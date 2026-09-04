@@ -1,10 +1,31 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from fastapi.responses import FileResponse
+from pathlib import Path
 from . import backend
 
 router = APIRouter(prefix="/api", tags=["runtime"])
 class Start(BaseModel): resolution: str = "640x480"
 class Recording(BaseModel): mode: str = "processed"
+def _recording_file(filename: str) -> Path:
+    safe = Path(filename).name
+    if safe != filename or Path(safe).suffix.lower() not in (".mp4", ".avi", ".mkv"): raise HTTPException(400, "无效的视频文件名")
+    path = backend.RECORDING_DIR / safe
+    if not path.is_file(): raise HTTPException(404, "视频文件不存在")
+    return path
+@router.get("/recordings")
+def recordings():
+    files=[]
+    for path in sorted(backend.RECORDING_DIR.glob("*"), key=lambda p:p.stat().st_mtime, reverse=True) if backend.RECORDING_DIR.exists() else []:
+        if path.suffix.lower() in (".mp4", ".avi", ".mkv"):
+            stat=path.stat(); files.append({"filename":path.name,"size_bytes":stat.st_size,"size_mb":round(stat.st_size/1048576,2),"modified_at":stat.st_mtime})
+    return {"items":files}
+@router.get("/recordings/{filename}/download")
+def download_recording(filename: str):
+    path=_recording_file(filename); return FileResponse(path, filename=path.name, media_type="video/mp4")
+@router.delete("/recordings/{filename}")
+def delete_recording(filename: str):
+    path=_recording_file(filename); path.unlink(); return {"ok":True,"filename":path.name,"message":"视频已删除"}
 @router.get("/algorithm/status")
 @router.get("/recording/status")
 def status():
