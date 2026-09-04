@@ -1,0 +1,1 @@
+<template><div class="metric"><span>{{label}}</span><strong>{{value==null||value===0?'--':Number(value).toFixed(1)}}</strong><small>{{unit}}</small></div></template><script setup>defineProps({label:String,value:Number,unit:String})</script>

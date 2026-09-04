@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -13,5 +14,13 @@ app.include_router(device_router); app.include_router(system_router); app.includ
 @app.exception_handler(Exception)
 async def api_error(_request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"error": str(exc) or "服务器内部错误"})
-WEB = Path(__file__).resolve().parents[1] / "frontend"
+WEB = Path(__file__).resolve().parents[1] / "frontend-vue" / "dist"
+@app.get("/device.html")
+def legacy_device(): return RedirectResponse("/device")
+@app.get("/settings.html")
+def legacy_settings(): return RedirectResponse("/settings")
+@app.get("/device")
+def device_spa(): return FileResponse(WEB / "index.html")
+@app.get("/settings")
+def settings_spa(): return FileResponse(WEB / "index.html")
 app.mount("/", StaticFiles(directory=str(WEB), html=True), name="frontend")

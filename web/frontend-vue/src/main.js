@@ -1,0 +1,2 @@
+import {createApp} from 'vue';import {createRouter,createWebHistory} from 'vue-router';import {createPinia} from 'pinia';import App from './App.vue';import Workbench from './views/Workbench.vue';import DeviceManagement from './views/DeviceManagement.vue';import SystemSettings from './views/SystemSettings.vue';import './style.css';
+const router=createRouter({history:createWebHistory(),routes:[{path:'/',component:Workbench},{path:'/device',component:DeviceManagement},{path:'/settings',component:SystemSettings}]});createApp(App).use(createPinia()).use(router).mount('#app');

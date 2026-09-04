@@ -1,0 +1,1 @@
+import {defineStore} from 'pinia';import {request} from '../api';export const useDeviceStore=defineStore('device',{state:()=>({identity:{}}),actions:{async refresh(){try{this.identity=(await request('/api/device/overview')).identity||{}}catch(e){}}}});

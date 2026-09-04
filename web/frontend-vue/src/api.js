@@ -1,0 +1,3 @@
+export const api=(new URLSearchParams(location.search).get('api')||`${location.protocol}//${location.hostname}:8080`).replace(/\/$/,'');
+export async function request(path,options={}){const r=await fetch(api+path,options),data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||`HTTP ${r.status}`);return data}
+export function post(path,body={}){return request(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}export function put(path,body){return request(path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
