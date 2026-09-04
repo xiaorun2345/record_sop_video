@@ -9,6 +9,7 @@ Log/
 web/frontend-vue/node_modules/
 output/lib/
 output/rk3588_sop
+output/imagegen/
 web/mediamtx/mediamtx
 auto.key
 auto.crt
