@@ -17,6 +17,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(OpenCV QUIET)
 find_package(Threads REQUIRED)
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+  pkg_check_modules(GSTREAMER QUIET gstreamer-1.0 gstreamer-app-1.0)
+endif()
 
 if(ENABLE_ORBBEC)
   set(ORBBEC_SDK_ROOT "" CACHE PATH "Orbbec SDK 根目录，指向 OrbbecSDK_v*/SDK 或其上级目录")
@@ -78,6 +82,7 @@ add_executable(rk3588_sop
   src/hand_skeleton_constraint.cpp
   src/sop_state_machine.cpp
   src/visualizer.cpp
+  src/stream_publisher.cpp
   third_party/hungarian_algorithm_cpp/Hungarian.cpp
 )
 
@@ -88,6 +93,13 @@ target_include_directories(rk3588_sop
 )
 
 target_link_libraries(rk3588_sop PRIVATE Threads::Threads)
+if(GSTREAMER_FOUND)
+  target_include_directories(rk3588_sop PRIVATE ${GSTREAMER_INCLUDE_DIRS})
+  target_link_libraries(rk3588_sop PRIVATE ${GSTREAMER_LIBRARIES})
+  target_compile_definitions(rk3588_sop PRIVATE RK3588_SOP_HAS_GSTREAMER=1)
+else()
+  target_compile_definitions(rk3588_sop PRIVATE RK3588_SOP_HAS_GSTREAMER=0)
+endif()
 
 if(OpenCV_FOUND)
   target_compile_definitions(rk3588_sop PRIVATE RK3588_SOP_HAS_OPENCV=1)

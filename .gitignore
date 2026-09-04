@@ -1,28 +1,18 @@
-# Build outputs
-/build/
-/cmake-build-*/
-CMakeFiles/
-CMakeCache.txt
-compile_commands.json
-
-# Runtime outputs
-/output/
-/Log/
-
-# Local editor files
-.vscode/
-.idea/
-.agents/
-.codex/
-.git-local/
-*.swp
-*~
-
-# Python cache
-__pycache__/
-*.py[cod]
-.pytest_cache/
-
-# System files
-.DS_Store
-Thumbs.db
+# Runtime and machine-local artifacts
+runtime_logs/
+output/recordings/
+output/backups/
+orbbec_*.mp4
+standalone_camera/Log/
+Log/
+**/__pycache__/
+output/lib/
+output/rk3588_sop
+web/mediamtx/mediamtx
+auto.key
+auto.crt
+config/device_identity.json
+config/network.json
+config/services.json
+config/storage_policy.json
+config/time.json

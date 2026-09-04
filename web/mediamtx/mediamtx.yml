@@ -1,0 +1,15 @@
+logLevel: info
+writeQueueSize: 32
+rtmp: yes
+rtmpAddress: :1935
+rtmpEncryption: "no"
+webrtc: yes
+webrtcAddress: :8889
+hls: no
+api: yes
+apiAddress: :9997
+paths:
+  sop:
+    source: publisher
+  raw:
+    source: publisher

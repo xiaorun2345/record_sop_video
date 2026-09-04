@@ -1,11 +1,12 @@
 # name: xiaorun
 # email: 15610499173@163.com
 
-# 本地视频 RKNN 配置：使用 INT8 RK3588 YOLOv8 模型，手部仍用现有 RKNN。
-input.type=video
-input.uri=recordings/orbbec_20240825_195251_973.mp4
-input.width=640
-input.height=480
+# 奥比中光（Orbbec）RGB-D 相机 RKNN 配置：使用 INT8 RK3588 YOLOv8 模型，手部仍用现有 RKNN。
+# 不填写 input.uri，程序会通过 Orbbec SDK 自动枚举相机。
+input.type=orbbec
+input.uri=
+input.width=1920
+input.height=1080
 input.fps=30
 
 detector.backend=rknn
@@ -27,7 +28,7 @@ hand.constraint.calibration_frames=45
 hand.constraint.smoothing=0.35
 hand.constraint.max_prediction_frames=8
 
-serial_light.enabled=true
+serial_light.enabled=false
 serial_light.device_path=/dev/ch341-light
 serial_light.baud_rate=9600
 

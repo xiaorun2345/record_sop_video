@@ -28,9 +28,10 @@
 
 #if RK3588_SOP_ENABLE_ORBBEC
 /**
- * @brief 把 Orbbec 彩色帧转成工程内部 RGB888。
+ * @brief 把 Orbbec 彩色帧转成工程内部 BGR888。
  *
- * Orbbec 可能输出 RGB/BGR/MJPG/YUYV/UYVY，推理链路统一使用 RGB。
+ * Orbbec 可能输出 RGB/BGR/MJPG/YUYV/UYVY，工程内部统一使用 BGR，
+ * 这样 OpenCV、GStreamer 的 video/x-raw,format=BGR 以及显示链路一致。
  */
 static bool ConvertOrbbecColorToRgb(const std::shared_ptr<ob::ColorFrame>& color_frame, ImageFrame* image) {
   if (!color_frame || image == nullptr || image->width <= 0 || image->height <= 0) {
@@ -44,19 +45,19 @@ static bool ConvertOrbbecColorToRgb(const std::shared_ptr<ob::ColorFrame>& color
     return false;
   }
 
-  image->pixel_format = PixelFormat::RGB;
+  image->pixel_format = PixelFormat::BGR;
   image->bgr_data.resize(expected_rgb_size);
   const OBFormat format = color_frame->format();
   if (format == OB_FORMAT_RGB) {
-    std::memcpy(image->bgr_data.data(), data, expected_rgb_size);
-    return true;
-  }
-  if (format == OB_FORMAT_BGR) {
     for (int i = 0; i < width * height; ++i) {
       image->bgr_data[static_cast<std::size_t>(i) * 3U] = data[static_cast<std::size_t>(i) * 3U + 2U];
       image->bgr_data[static_cast<std::size_t>(i) * 3U + 1U] = data[static_cast<std::size_t>(i) * 3U + 1U];
       image->bgr_data[static_cast<std::size_t>(i) * 3U + 2U] = data[static_cast<std::size_t>(i) * 3U];
     }
+    return true;
+  }
+  if (format == OB_FORMAT_BGR) {
+    std::memcpy(image->bgr_data.data(), data, expected_rgb_size);
     return true;
   }
 
@@ -68,7 +69,6 @@ static bool ConvertOrbbecColorToRgb(const std::shared_ptr<ob::ColorFrame>& color
     if (decoded.empty()) {
       return false;
     }
-    cv::cvtColor(decoded, decoded, cv::COLOR_BGR2RGB);
     if (decoded.cols != width || decoded.rows != height) {
       cv::resize(decoded, decoded, cv::Size(width, height));
     }
@@ -77,16 +77,16 @@ static bool ConvertOrbbecColorToRgb(const std::shared_ptr<ob::ColorFrame>& color
   }
   if (format == OB_FORMAT_YUYV) {
     cv::Mat yuyv(height, width, CV_8UC2, const_cast<std::uint8_t*>(data));
-    cv::Mat rgb;
-    cv::cvtColor(yuyv, rgb, cv::COLOR_YUV2RGB_YUY2);
-    image->bgr_data.assign(rgb.data, rgb.data + rgb.total() * rgb.elemSize());
+    cv::Mat bgr;
+    cv::cvtColor(yuyv, bgr, cv::COLOR_YUV2BGR_YUY2);
+    image->bgr_data.assign(bgr.data, bgr.data + bgr.total() * bgr.elemSize());
     return true;
   }
   if (format == OB_FORMAT_UYVY) {
     cv::Mat uyvy(height, width, CV_8UC2, const_cast<std::uint8_t*>(data));
-    cv::Mat rgb;
-    cv::cvtColor(uyvy, rgb, cv::COLOR_YUV2RGB_UYVY);
-    image->bgr_data.assign(rgb.data, rgb.data + rgb.total() * rgb.elemSize());
+    cv::Mat bgr;
+    cv::cvtColor(uyvy, bgr, cv::COLOR_YUV2BGR_UYVY);
+    image->bgr_data.assign(bgr.data, bgr.data + bgr.total() * bgr.elemSize());
     return true;
   }
 #endif
@@ -159,6 +159,7 @@ class VideoSource::Impl {
   OBCalibrationParam calibration_param{};
   bool has_calibration_param = false;
   bool transform_depth_to_color = false;
+  bool software_depth_fallback = false;
 #endif
 };
 #endif
@@ -443,25 +444,44 @@ bool VideoSource::ReadRgbd(RgbdFrame* frame) {
       if (frameset == nullptr || frameset->colorFrame() == nullptr || frameset->depthFrame() == nullptr) {
         return false;
       }
+      // 丢弃已经积压的旧帧，只处理队列中最新的一组 RGB-D 帧，避免算法
+      // 推理速度低于相机帧率时延迟持续累积。
+      // SDK 内部队列在处理线程落后时可能积累几十到上百帧；只清理几帧
+      // 仍会把数秒前的画面送入推流。持续快速取帧，直到队列基本为空。
+      for (int drain = 0; drain < 120; ++drain) {
+        try {
+          std::shared_ptr<ob::FrameSet> newer = impl_->pipeline->waitForFrames(1);
+          if (newer != nullptr && newer->colorFrame() != nullptr && newer->depthFrame() != nullptr) {
+            frameset = std::move(newer);
+          } else {
+            break;
+          }
+        } catch (...) {
+          break;
+        }
+      }
 
       std::shared_ptr<ob::ColorFrame> color_frame = frameset->colorFrame();
       std::shared_ptr<ob::DepthFrame> depth_frame = frameset->depthFrame();
       const int color_width = static_cast<int>(color_frame->width());
       const int color_height = static_cast<int>(color_frame->height());
-      if (impl_->transform_depth_to_color) {
+      bool software_depth_resize = impl_->software_depth_fallback;
+      if (impl_->transform_depth_to_color && !software_depth_resize) {
         std::shared_ptr<ob::Frame> transformed_depth =
             ob::CoordinateTransformHelper::transformationDepthFrameToColorCamera(
                 impl_->pipeline->getDevice(), depth_frame, static_cast<uint32_t>(color_width),
                 static_cast<uint32_t>(color_height));
-        if (transformed_depth == nullptr) {
-          return false;
+        if (transformed_depth == nullptr || transformed_depth->as<ob::DepthFrame>() == nullptr) {
+          software_depth_resize = true;
+          impl_->software_depth_fallback = true;
+        } else {
+          depth_frame = transformed_depth->as<ob::DepthFrame>();
         }
-        depth_frame = transformed_depth->as<ob::DepthFrame>();
       }
       const int depth_width = static_cast<int>(depth_frame->width());
       const int depth_height = static_cast<int>(depth_frame->height());
       // D2C 对齐后深度图尺寸必须和彩色图一致，否则不能用 RGB 坐标查深度。
-      if (color_width != depth_width || color_height != depth_height) {
+      if (!software_depth_resize && (color_width != depth_width || color_height != depth_height)) {
         std::cerr << "深度图未对齐到彩色图，拒绝输出 RGB-D 帧" << std::endl;
         return false;
       }
@@ -470,7 +490,9 @@ bool VideoSource::ReadRgbd(RgbdFrame* frame) {
                   << ", depth=" << depth_width << "x" << depth_height
                   << ", depth_scale_m=" << depth_frame->getValueScale() * 0.001F
                   << ", aligned_to_color=true"
-                  << (impl_->transform_depth_to_color ? ", align_method=transformation" : ", align_method=d2c")
+                  << (software_depth_resize ? ", align_method=software_resize"
+                                             : (impl_->transform_depth_to_color ? ", align_method=transformation"
+                                                                                 : ", align_method=d2c"))
                   << std::endl;
         logged_rgbd_profile_ = true;
       }
@@ -485,13 +507,27 @@ bool VideoSource::ReadRgbd(RgbdFrame* frame) {
         return false;
       }
 
-      frame->depth_width = depth_width;
-      frame->depth_height = depth_height;
+      frame->depth_width = software_depth_resize ? color_width : depth_width;
+      frame->depth_height = software_depth_resize ? color_height : depth_height;
       // SDK 深度比例通常为毫米单位，内部统一换算成米。
       frame->depth_scale = depth_frame->getValueScale() * 0.001F;
       frame->depth_aligned_to_color = true;
-      frame->depth_data.resize(static_cast<std::size_t>(depth_width) * static_cast<std::size_t>(depth_height));
-      std::memcpy(frame->depth_data.data(), depth_frame->data(), frame->depth_data.size() * sizeof(std::uint16_t));
+      if (!software_depth_resize) {
+        frame->depth_data.resize(static_cast<std::size_t>(depth_width) * static_cast<std::size_t>(depth_height));
+        std::memcpy(frame->depth_data.data(), depth_frame->data(), frame->depth_data.size() * sizeof(std::uint16_t));
+      } else {
+        const auto* raw = static_cast<const std::uint16_t*>(depth_frame->data());
+        if (raw == nullptr || depth_width <= 0 || depth_height <= 0) return false;
+        frame->depth_data.resize(static_cast<std::size_t>(color_width) * static_cast<std::size_t>(color_height));
+        for (int y = 0; y < color_height; ++y) {
+          const int sy = std::min(depth_height - 1, y * depth_height / color_height);
+          for (int x = 0; x < color_width; ++x) {
+            const int sx = std::min(depth_width - 1, x * depth_width / color_width);
+            frame->depth_data[static_cast<std::size_t>(y) * color_width + x] =
+                raw[static_cast<std::size_t>(sy) * depth_width + sx];
+          }
+        }
+      }
       return true;
     } catch (const ob::Error& error) {
       std::cerr << "读取奥比中光 RGB-D 帧失败: " << error.getMessage() << std::endl;

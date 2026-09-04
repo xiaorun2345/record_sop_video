@@ -24,6 +24,8 @@ class Visualizer {
    * @param state_machine SOP 状态机。
    */
   void Draw(ImageFrame* frame, const PerceptionResult& result, const SopStateMachine& state_machine) const;
+
+  bool HandLandmarksVisible() const;
 };
 
 #endif  // TOOLCHAINS_RK3588_EXAMPLES_RK3588_SOP_INCLUDE_VISUALIZER_H_

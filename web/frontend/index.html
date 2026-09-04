@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DenseAI Edge Console</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#"><span class="brand-mark">⬡</span><span>DenseAI</span></a>
+    <nav>
+      <a class="nav-item active" href="#" data-nav="工作台"><span>⌂</span>工作台</a>
+      <a class="nav-item" href="#" data-nav="SOP 管理"><span>▧</span>SOP 管理 <b>›</b></a>
+      <a class="nav-item" href="#" data-nav="AI 模型管理"><span>◎</span>AI 模型管理 <b>›</b></a>
+      <a class="nav-item" href="#" data-nav="相机管理"><span>▣</span>相机管理 <b>›</b></a>
+      <a class="nav-item" href="#" data-nav="数据管理"><span>▤</span>数据管理 <b>›</b></a>
+      <a class="nav-item" href="#" data-nav="告警管理"><span>♧</span>告警管理 <em>5</em></a>
+      <a class="nav-item" href="device.html" data-nav="设备管理"><span>▰</span>设备管理 <b>›</b></a>
+      <a class="nav-item" href="settings.html" data-nav="系统设置"><span>⚙</span>系统设置 <b>›</b></a>
+    </nav>
+    <section class="device-card">
+      <small>当前设备</small><strong id="sidebar-device-name">RK3588-EDGE-001</strong>
+      <div class="device-row"><span class="device-icon">▰</span><span>IP 地址<br><b>192.168.1.100</b></span></div>
+      <p>工位编号 <span id="sidebar-station-id">--</span></p><p>固件版本 <span>v1.2.0</span></p><p>运行时长 <span>2天 14小时 32分</span></p>
+      <p>系统时间 <span id="system-time">--</span></p><button id="device-details" class="soft-button">设备详情</button>
+    </section>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <strong id="top-device-name">DenseAI Edge Console</strong><i></i><span>RK3588 工业视觉 SOP 作业台</span>
+      <span class="online"><u></u>设备在线</span><div class="top-spacer"></div>
+      <span>◎ 简体中文⌄</span><span class="bell">♧<b>12</b></span><span>操作员</span><span class="avatar">人</span>
+    </header>
+    <div class="content">
+      <section class="left-panel">
+        <div class="tabs"><button id="tab-live" class="tab active">▣　实时预览</button><button id="tab-history" class="tab">▧　历史记录</button></div>
+        <div class="selectors">
+          <label>相机选择<select><option>Camera 01</option></select></label>
+          <label>分辨率<select id="resolution-select"><option value="1920x1080">1920×1080</option><option value="640x480">640×480</option></select></label>
+          <label>模型<select><option>YOLOv8s-Hand & Part</option></select></label>
+          <button class="config-button">⚙　检测配置</button>
+        </div>
+        <section class="camera-card">
+          <div class="video-stage">
+            <video id="camera-video" src="../../orbbec_20240825_194537_841.mp4" muted loop playsinline></video>
+            <span class="fps">FPS: <b id="fps">32.6</b></span>
+            <div class="roi-label">当前作业区域 · RGB 视频流</div>
+          </div>
+          <div class="video-controls">
+            <button id="play-toggle" class="control-icon">▶<small>启动算法</small></button><button id="screenshot-button" class="control-icon">▣<small>截图</small></button>
+            <label class="record-mode">录制内容<select id="record-mode-select"><option value="processed">算法处理视频</option><option value="raw">原始视频</option></select></label><button id="record-button" class="control-icon record">⦿<small>录制</small></button><button id="light-button" class="control-icon">☼<small>补光灯</small></button>
+            <span class="zoom">−　 <b>100%</b>　 +</span><button class="control-icon fullscreen">⛶<small>全屏</small></button>
+          </div>
+        </section>
+        <div class="bottom-cards">
+          <section class="info-card hand-card"><h3>手部关键点（21点）</h3><span class="score">置信度：0.95</span><label><span id="landmark-visibility-label">关键点可视化已启用</span> <input id="landmark-visibility" type="checkbox" checked></label></section>
+        </div>
+      </section>
+
+      <aside class="right-panel">
+        <section class="step-card">
+          <div class="card-heading"><h3>当前 SOP 步骤</h3><span>步骤 <b id="step-no">3</b> / 8</span></div><div class="progress"><i id="progress-bar"></i></div>
+          <div class="step-hero"><span>◇</span><div><h2 id="step-title">安装连接器</h2><p id="step-desc">将连接器正确插入主板对应接口并确保卡扣到位</p></div></div>
+          <ol class="steps"><li class="done">✓ <span>准备连接器</span><em>已完成</em></li><li class="current">● <span>安装连接器</span><em>进行中</em></li><li>○ <span>固定连接器</span><em>待执行</em></li></ol>
+          <div class="overall"><b>整体进度</b><strong id="percent">37%</strong></div><div class="progress overall-bar"><i id="overall-bar"></i></div>
+          <div class="job-actions"><button id="camera-start">启动摄像头</button><button id="camera-stop">关闭摄像头</button><button id="job-start">启动算法</button><button id="job-pause">关闭算法</button><button id="job-finish" class="danger-button">结束作业</button></div>
+        </section>
+        <div class="metrics">
+          <section><small>FPS</small><strong class="metric-blue" id="metric-fps">32.6</strong><span>FPS</span><svg viewBox="0 0 140 30"><path d="M0 25 L10 23 L18 12 L27 23 L40 10 L51 17 L62 11 L73 18 L86 13 L98 22 L109 16 L122 23 L140 20"/></svg></section>
+          <section><small>NPU 延迟</small><strong class="metric-cyan" id="metric-npu-latency">--</strong><span>ms</span><svg viewBox="0 0 140 30"><path d="M0 24 L11 13 L21 17 L31 11 L42 15 L54 12 L65 22 L77 18 L88 25 L102 16 L114 22 L128 16 L140 24"/></svg></section>
+          <section><small class="warm">温度</small><strong class="metric-warm" id="metric-cpu-temperature">--</strong><span>°C</span><svg class="orange-line" viewBox="0 0 140 30"><path d="M0 20 L10 10 L23 14 L35 7 L48 13 L59 10 L74 17 L87 14 L101 19 L115 15 L129 21 L140 19"/></svg></section>
+        </div>
+        <section class="events"><div class="card-heading"><h3>告警信息</h3><a href="#">查看全部</a></div><ul id="event-list"><li class="danger"><b>△</b><span>连接器未检测到<small>步骤：安装连接器</small></span><time>10:24:18</time></li><li class="warning"><b>△</b><span>螺丝漏装检测<small>步骤：固定螺丝</small></span><time>10:22:47</time></li><li><b>♨</b><span>温度告警<small>当前温度：48.6°C</small></span><time>10:15:32</time></li><li><b>♧</b><span>模型切换成功<small>已切换至 YOLOv8s-Hand & Part</small></span><time>10:10:05</time></li></ul></section>
+        <section class="notes"><h3>作业备注</h3><div><input placeholder="请输入备注信息..."><button>保存</button></div></section>
+      </aside>
+    </div>
+    <footer>© 2025 DenseAI. All rights reserved.<span>版本：v1.2.0</span></footer>
+  </main>
+  <div class="alarm" id="alarm"><span>⚠</span><div><b>报警中 · 连接器未检测到</b><small>声光报警剩余 <em id="alarm-count">5</em> 秒</small></div><button id="dismiss-alarm">立即关闭</button></div>
+  <script src="app.js"></script>
+</body>
+</html>

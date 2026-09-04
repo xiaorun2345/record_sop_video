@@ -9,6 +9,7 @@
 #include <array>
 #include <iomanip>
 #include <iostream>
+#include <fstream>
 #include <sstream>
 
 #if RK3588_SOP_HAS_OPENCV
@@ -29,6 +30,11 @@ static std::string FormatPoint3D(const Point3D& point) {
   std::ostringstream stream;
   stream << std::fixed << std::setprecision(2) << point.x << "," << point.y << "," << point.z << "m";
   return stream.str();
+}
+
+bool Visualizer::HandLandmarksVisible() const {
+  std::ifstream marker("/tmp/rk3588_sop_hand_landmarks_visible");
+  return marker.good();
 }
 
 void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const SopStateMachine& state_machine) const {
@@ -68,6 +74,7 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
                   cv::FONT_HERSHEY_SIMPLEX, 0.52, color, 2);
     }
   }
+  const bool draw_hand_landmarks = HandLandmarksVisible();
   // 手部关键点用于观察 RKNN 手部关键点输出是否稳定。
   for (std::size_t hand_index = 0; hand_index < result.hands.size(); ++hand_index) {
     const HandPose& hand = result.hands[hand_index];
@@ -81,7 +88,7 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
         {5, 9}, {9, 13}, {13, 17},
     }};
     const cv::Scalar hand_color = hand_index == 0U ? cv::Scalar(255, 255, 255) : cv::Scalar(255, 255, 0);
-    if (hand.box.width > 0 && hand.box.height > 0) {
+    if (draw_hand_landmarks && hand.box.width > 0 && hand.box.height > 0) {
       cv::Rect hand_rect(hand.box.x, hand.box.y, hand.box.width, hand.box.height);
       cv::rectangle(image, hand_rect, hand_color, 2);
       std::string hand_label = "hand " + std::to_string(hand_index);
@@ -91,6 +98,9 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
       hand_label += " " + std::to_string(hand.score);
       cv::putText(image, hand_label, cv::Point(hand.box.x, std::max(20, hand.box.y - 6)),
                   cv::FONT_HERSHEY_SIMPLEX, 0.5, hand_color, 1);
+    }
+    if (!draw_hand_landmarks) {
+      continue;
     }
     std::vector<cv::Point> points;
     std::vector<bool> point_has_3d;

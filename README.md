@@ -159,7 +159,7 @@ input.type=orbbec
 
 ## SOP 工作台页面
 
-页面入口为 [`web/index.html`](web/index.html)。它是独立的浏览器工作台，包含实时画面区域、RGB-D 采集状态、步骤计时、完成率、连续确认帧数和跳步/超时/深度异常预警。
+页面入口为 [`web/frontend/index.html`](web/frontend/index.html)。前端、后端控制服务和 MediaMTX 分别位于 `web/frontend/`、`web/backend/` 和 `web/mediamtx/`。
 
 在工程根目录启动静态预览：
 
@@ -167,7 +167,18 @@ input.type=orbbec
 python3 -m http.server 4173
 ```
 
-然后打开 `http://127.0.0.1:4173/web/index.html`。页面默认加载 `config/demo.mp4` 作为离线画面，并提供 Gemini RGB-D、网络流、640x480、1280x720 和 1920x1080 的界面选项。当前正式程序还没有 HTTP 视频推流或结构化状态服务，因此页面默认使用演示状态；后端接入后可通过 `?api=http://设备地址` 轮询 `/api/sop/state`，返回 `steps`、`current_elapsed_sec` 和 `total_elapsed_sec` 即可更新流程面板。
+然后打开 `http://127.0.0.1:4173/web/frontend/index.html`。算法启停由 `web/backend/backend.py` 提供的 API 控制。
+
+完整网页工作流需要同时启动三个服务（建议分别打开终端）：
+
+```bash
+./scripts/run_mediamtx.sh
+./scripts/run_backend.sh
+python3 -m http.server 4173
+```
+
+然后访问 `http://设备IP:4173/web/frontend/index.html`，点击“启动算法”。网页播放的是
+MediaMTX 的 WebRTC 算法结果流（端口 `8889`），不是本地 MP4 演示画面。
 
 ## 配置说明
 
@@ -278,3 +289,6 @@ detector.labels=cover_cloth,long_handle,manual,padding_board,small_red_lever,top
 - `0`：SOP 状态机完成。
 - `1`：配置、模型或输入初始化失败。
 - `2`：视频流结束、用户按 `Esc` 退出或检测中断，但 SOP 未完成。当前默认检测模式下通常会以 `2` 结束。
+# Web 访问与录像
+
+启动 `scripts/run_backend.sh` 后，浏览器直接访问 `http://设备IP:8080/`（只需要 IP 和端口）。工作台的“录制内容”可选择算法处理视频或原始视频，录像由 GStreamer `mpph264enc` 硬件编码保存到 `output/recordings/*.mp4`。

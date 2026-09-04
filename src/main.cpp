@@ -6,10 +6,17 @@
 #include <chrono>
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <ctime>
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -24,6 +31,9 @@
 #include "video_source.h"
 #include "visualizer.h"
 #include "yolov8_detector.h"
+#if RK3588_SOP_HAS_GSTREAMER
+#include "stream_publisher.h"
+#endif
 
 #if RK3588_SOP_HAS_OPENCV
 #include <opencv2/opencv.hpp>
@@ -532,7 +542,27 @@ int main(int argc, char** argv) {
     }
   }
   bool show_window = config.show_window;
+  // Web 控制端运行时不应尝试打开本地 HighGUI 窗口；无 DISPLAY 时
+  // imshow 还可能阻塞算法进程，导致推流看起来“卡死”。
+  if (const char* no_window = std::getenv("RK3588_SOP_NO_WINDOW")) {
+    if (std::string(no_window) == "1" || std::string(no_window) == "true") {
+      show_window = false;
+    }
+  }
   bool state_initialized_from_frame = false;
+  // Without the web/GStreamer control plane this is the normal CLI mode:
+  // process frames immediately.  The web build switches it off until the
+  // backend creates the mode file.
+  bool algorithm_enabled = true;
+#if RK3588_SOP_HAS_GSTREAMER
+  StreamPublisher stream_publisher;
+  StreamPublisher raw_stream_publisher;
+  StreamPublisher file_recorder;
+  std::chrono::steady_clock::time_point next_stream_frame_time;
+  bool stream_clock_initialized = false;
+  algorithm_enabled = false;
+  const std::filesystem::path mode_file = "/tmp/rk3588_sop_algorithm_enabled";
+#endif
 
   // 打开视频源。config.input.type 决定是 video/camera/gstreamer/orbbec。
   // 这里要求真实输入必须成功，避免把部署问题伪装成算法成功。
@@ -542,38 +572,142 @@ int main(int argc, char** argv) {
     std::cerr << "视频输入打开失败，实机流程停止。请检查 input.type、相机、SDK 和权限配置" << std::endl;
     return 1;
   }
-
 #if RK3588_SOP_HAS_OPENCV
-  cv::VideoWriter writer;
-  if (config.save_video) {
-    const std::filesystem::path output_path(config.output_video_path);
-    if (output_path.has_parent_path()) {
-      std::filesystem::create_directories(output_path.parent_path());
+  std::string recording_mode;
+  std::filesystem::path recording_path;
+  const std::filesystem::path recording_control = "/tmp/rk3588_sop_recording";
+  auto open_recording = [&](const std::string& mode) {
+#if RK3588_SOP_HAS_GSTREAMER
+    file_recorder.Close();
+#endif
+    recording_path.clear();
+    if (mode != "processed" && mode != "raw") return;
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t stamp = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_stamp{};
+    localtime_r(&stamp, &tm_stamp);
+    char name[64];
+    std::strftime(name, sizeof(name), "%Y%m%d_%H%M%S", &tm_stamp);
+    const std::filesystem::path dir = std::filesystem::path("output") / "recordings";
+    std::filesystem::create_directories(dir);
+    recording_path = dir / (std::string(name) + "_" + mode + ".mp4");
+#if RK3588_SOP_HAS_GSTREAMER
+    if (!file_recorder.OpenFile(config.input.width, config.input.height, config.input.fps, recording_path.string())) {
+      recording_path.clear();
+      std::cerr << "录像打开失败，模式=" << mode << std::endl;
+      return;
     }
-    writer.open(config.output_video_path, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), config.input.fps,
-                cv::Size(config.input.width, config.input.height));
-    if (!writer.isOpened()) {
-      std::filesystem::path fallback_path = output_path;
-      fallback_path.replace_extension(".avi");
-      writer.open(fallback_path.string(), cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), config.input.fps,
-                  cv::Size(config.input.width, config.input.height));
-      if (writer.isOpened()) {
-        std::cout << "结果视频保存到: " << fallback_path.string() << std::endl;
-      }
-    } else {
-      std::cout << "结果视频保存到: " << config.output_video_path << std::endl;
-    }
-    if (!writer.isOpened()) {
-      std::cerr << "结果视频保存打开失败: " << config.output_video_path << std::endl;
-    }
-  }
+#else
+    std::cerr << "当前构建未启用 GStreamer，无法使用 MPP 硬件录像" << std::endl; recording_path.clear(); return;
+#endif
+    recording_mode = mode;
+    std::cout << "录像已开始 (" << mode << "): " << recording_path.string() << std::endl;
+  };
+  if (config.save_video) open_recording("processed");
 #endif
 
-  while (!state_machine.state().finished) {
+  // 相机服务生命周期独立于 SOP 状态机：即使一次 SOP 已完成，相机和原始流也继续运行，
+  // 直到后端停止相机进程。这样关闭/重新开启算法不会重新占用 USB 相机。
+  int consecutive_read_failures = 0;
+  std::uint64_t fps_frames = 0;
+  auto fps_window_begin = std::chrono::steady_clock::now();
+  std::mutex latest_mutex;
+  std::condition_variable latest_cv;
+  RgbdFrame latest_frame;
+  bool latest_available = false;
+  std::atomic<bool> capture_stop{false};
+  std::thread capture_thread([&] {
+    while (!capture_stop.load()) {
+      RgbdFrame captured;
+      if (!source.ReadRgbd(&captured)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        continue;
+      }
+#if RK3588_SOP_HAS_GSTREAMER
+      if (!raw_stream_publisher.opened()) {
+        const char* raw_url = std::getenv("RK3588_SOP_RAW_RTMP_URL");
+        if (!raw_url) raw_url = "rtmp://127.0.0.1:1935/raw";
+        raw_stream_publisher.Open(captured.color.width, captured.color.height, config.input.fps, raw_url);
+      }
+      if (raw_stream_publisher.opened()) raw_stream_publisher.PushBgr(captured.color.bgr_data.data(), captured.color.bgr_data.size());
+#endif
+      ++fps_frames;
+      const auto now = std::chrono::steady_clock::now();
+      const double elapsed = std::chrono::duration<double>(now - fps_window_begin).count();
+      if (elapsed >= 1.0) {
+        std::ofstream fps_file("/tmp/rk3588_sop_fps", std::ios::trunc);
+        if (fps_file) fps_file << (static_cast<double>(fps_frames) / elapsed) << "\n";
+        fps_frames = 0; fps_window_begin = now;
+      }
+      {
+        std::lock_guard<std::mutex> lock(latest_mutex);
+        latest_frame = std::move(captured);
+        latest_available = true;
+      }
+      latest_cv.notify_one();
+    }
+  });
+  while (true) {
     RgbdFrame frame;
-    if (!source.ReadRgbd(&frame)) {
+    {
+      std::unique_lock<std::mutex> lock(latest_mutex);
+      latest_cv.wait(lock, [&] { return latest_available || capture_stop.load(); });
+      if (capture_stop.load() && !latest_available) break;
+      frame = std::move(latest_frame);
+      latest_available = false;
+    }
+    if (frame.color.bgr_data.empty()) {
+      // Orbbec 在启动、USB 调度抖动或深度帧暂时缺失时可能返回空帧。
+      // 不应因一次瞬时失败就退出整个相机服务，否则前端点击启动后会
+      // 看到进程已启动但视频立即消失。连续失败一段时间才认为设备断开。
+      ++consecutive_read_failures;
+      if (consecutive_read_failures < 30) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        continue;
+      }
+      std::cerr << "连续 " << consecutive_read_failures << " 次读取视频帧失败，相机服务退出" << std::endl;
       break;
     }
+    consecutive_read_failures = 0;
+#if RK3588_SOP_HAS_OPENCV
+    const std::vector<std::uint8_t> raw_bgr = frame.color.bgr_data;
+#endif
+#if RK3588_SOP_HAS_OPENCV
+    {
+      std::string requested_mode;
+      std::ifstream control(recording_control);
+      if (control) std::getline(control, requested_mode);
+      if (requested_mode != recording_mode) {
+        if (requested_mode == "processed" || requested_mode == "raw") open_recording(requested_mode);
+        else if (requested_mode.empty()) { file_recorder.Close(); recording_mode.clear(); recording_path.clear(); }
+      }
+    }
+#endif
+#if RK3588_SOP_HAS_GSTREAMER
+    // Use the actual decoded frame size. Video files and cameras can ignore
+    // the requested config dimensions; opening appsrc with stale caps makes
+    // downstream conversion/encoding stall or reject every buffer.
+    if (!stream_publisher.opened()) {
+      if (const char* stream_url = std::getenv("RK3588_SOP_RTMP_URL")) {
+        if (stream_publisher.Open(frame.color.width, frame.color.height, config.input.fps, stream_url)) {
+          std::cout << "算法结果推流已开启: " << stream_url << " ("
+                    << frame.color.width << "x" << frame.color.height << ")" << std::endl;
+        } else {
+          std::cerr << "算法结果推流启动失败: " << stream_url << std::endl;
+        }
+      }
+    }
+    // 后端通过该文件切换算法执行状态；文件不存在时默认为关闭算法，
+    // 但相机和原始视频流仍持续工作。
+    {
+      std::error_code mode_error;
+      const bool requested = std::filesystem::exists(mode_file, mode_error);
+      if (requested != algorithm_enabled) {
+        algorithm_enabled = requested;
+        std::cout << (algorithm_enabled ? "算法处理已开启" : "算法处理已关闭，当前输出原始视频") << std::endl;
+      }
+    }
+#endif
     if (!state_initialized_from_frame) {
       state_machine.Reset(frame.color.timestamp_sec);
       state_initialized_from_frame = true;
@@ -583,10 +717,41 @@ int main(int argc, char** argv) {
     if (source.last_capture_read_ms() > 0.0) {
       metrics.read_ms = source.last_capture_read_ms() + source.last_color_convert_ms() + source.last_frame_copy_ms();
     }
-    if (!ProcessFrame(&frame, source, &detector, &hand_detector, &hand_skeleton_constraint,
-                      &object_tracker, &state_machine, serial_light_ptr, visualizer, &metrics)) {
-      break;
+    if (algorithm_enabled && !state_machine.state().finished) {
+      if (!ProcessFrame(&frame, source, &detector, &hand_detector, &hand_skeleton_constraint,
+                        &object_tracker, &state_machine, serial_light_ptr, visualizer, &metrics)) {
+        break;
+      }
+      // Expose the current aggregate NPU inference latency to the web console.
+      std::ofstream npu_latency_file("/tmp/rk3588_sop_npu_latency_ms", std::ios::trunc);
+      if (npu_latency_file) {
+        npu_latency_file << std::fixed << std::setprecision(3)
+                         << (metrics.yolo_npu_ms + metrics.hand_det_npu_ms + metrics.hand_lm_npu_ms) << "\n";
+      }
     }
+#if RK3588_SOP_HAS_GSTREAMER
+    if (algorithm_enabled && stream_publisher.opened()) {
+      stream_publisher.PushBgr(frame.color.bgr_data.data(), frame.color.bgr_data.size());
+      // A file source can be decoded much faster than real time. Pace only
+      // that case so the RTMP/WebRTC consumer receives the configured 30 FPS
+      // cadence instead of a burst followed by an apparent freeze.
+      if (config.input.type == "video" && config.input.fps > 0) {
+        const auto period = std::chrono::microseconds(1000000 / config.input.fps);
+        const auto now = std::chrono::steady_clock::now();
+        if (!stream_clock_initialized) {
+          next_stream_frame_time = now + period;
+          stream_clock_initialized = true;
+        } else {
+          next_stream_frame_time += period;
+          if (next_stream_frame_time > now) {
+            std::this_thread::sleep_until(next_stream_frame_time);
+          } else {
+            next_stream_frame_time = now + period;
+          }
+        }
+      }
+    }
+#endif
 
 #if RK3588_SOP_HAS_OPENCV
     if (show_window && !frame.color.bgr_data.empty()) {
@@ -603,14 +768,24 @@ int main(int argc, char** argv) {
         show_window = false;
       }
     }
-    if (config.save_video && writer.isOpened() && !frame.color.bgr_data.empty()) {
-      cv::Mat image = MakeDisplayImage(frame.color);
-      writer.write(image);
+    if (file_recorder.opened() && !frame.color.bgr_data.empty()) {
+      const auto& bytes = recording_mode == "raw" ? raw_bgr : frame.color.bgr_data;
+      file_recorder.PushBgr(bytes.data(), bytes.size());
     }
 #endif
   }
 
+  capture_stop.store(true);
+  latest_cv.notify_one();
+  if (capture_thread.joinable()) capture_thread.join();
   source.Close();
+#if RK3588_SOP_HAS_OPENCV
+  file_recorder.Close();
+#endif
+#if RK3588_SOP_HAS_GSTREAMER
+  stream_publisher.Close();
+  raw_stream_publisher.Close();
+#endif
   serial_light.TurnOff();
-  return state_machine.state().finished ? 0 : 2;
+  return 0;
 }

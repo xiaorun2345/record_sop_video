@@ -23,14 +23,13 @@
 
 namespace {
 
-constexpr int kWidth = 1920;
-constexpr int kHeight = 1080;
 constexpr int kFps = 30;
-constexpr char kWindowName[] = "Orbbec 1920x1080";
 constexpr std::size_t kMaxQueuedFrames = 4;
 
 struct AppOptions {
   double record_seconds = 0.0;
+  int width = 1920;
+  int height = 1080;
 };
 
 bool ParseArgs(const int argc, char** argv, AppOptions* options) {
@@ -43,8 +42,16 @@ bool ParseArgs(const int argc, char** argv, AppOptions* options) {
       options->record_seconds = std::strtod(argv[++i], nullptr);
     } else if (arg.rfind("--record-seconds=", 0) == 0) {
       options->record_seconds = std::strtod(arg.substr(17).c_str(), nullptr);
+    } else if (arg == "--resolution" && i + 1 < argc) {
+      const std::string value = argv[++i];
+      if (value == "640x480") { options->width = 640; options->height = 480; }
+      else if (value != "1920x1080") { std::cerr << "分辨率仅支持 1920x1080 或 640x480" << std::endl; return false; }
+    } else if (arg.rfind("--resolution=", 0) == 0) {
+      const std::string value = arg.substr(13);
+      if (value == "640x480") { options->width = 640; options->height = 480; }
+      else if (value != "1920x1080") { std::cerr << "分辨率仅支持 1920x1080 或 640x480" << std::endl; return false; }
     } else if (arg == "-h" || arg == "--help") {
-      std::cout << "Usage: orbbec_1080p [--record-seconds N]" << std::endl;
+      std::cout << "Usage: orbbec_1080p [--resolution 1920x1080|640x480] [--record-seconds N]" << std::endl;
       return false;
     } else {
       std::cerr << "未知参数: " << arg << std::endl;
@@ -58,7 +65,7 @@ bool ParseArgs(const int argc, char** argv, AppOptions* options) {
 }
 
 std::shared_ptr<ob::VideoStreamProfile> Find1080pColorProfile(
-    const std::shared_ptr<ob::StreamProfileList>& profiles) {
+    const std::shared_ptr<ob::StreamProfileList>& profiles, int width, int height) {
   if (!profiles) {
     return nullptr;
   }
@@ -67,7 +74,7 @@ std::shared_ptr<ob::VideoStreamProfile> Find1080pColorProfile(
   for (const OBFormat format : {OB_FORMAT_MJPG, OB_FORMAT_RGB, OB_FORMAT_BGR,
                                 OB_FORMAT_YUYV, OB_FORMAT_UYVY}) {
     try {
-      return profiles->getVideoStreamProfile(kWidth, kHeight, format, kFps);
+      return profiles->getVideoStreamProfile(width, height, format, kFps);
     } catch (const ob::Error&) {
       // 当前格式没有精确匹配，继续尝试下一个格式。
     }
@@ -76,7 +83,7 @@ std::shared_ptr<ob::VideoStreamProfile> Find1080pColorProfile(
 }
 
 bool ColorFrameToBgr(const std::shared_ptr<ob::ColorFrame>& frame, cv::Mat* bgr) {
-  if (!frame || bgr == nullptr || frame->width() != kWidth || frame->height() != kHeight ||
+    if (!frame || bgr == nullptr || frame->data() == nullptr ||
       frame->data() == nullptr) {
     return false;
   }
@@ -185,7 +192,7 @@ bool HasGstreamerElement(const char* name) {
 
 class HardwareVideoRecorder {
  public:
-  HardwareVideoRecorder() : worker_(&HardwareVideoRecorder::WorkerLoop, this) {}
+  HardwareVideoRecorder(int width, int height) : width_(width), height_(height), worker_(&HardwareVideoRecorder::WorkerLoop, this) {}
 
   ~HardwareVideoRecorder() {
     Shutdown();
@@ -270,7 +277,9 @@ class HardwareVideoRecorder {
     GstElement* pipeline = nullptr;
     GstElement* app_source = nullptr;
     std::uint64_t first_capture_time_ns = 0;
-    std::string path;
+      std::string path;
+    int width = 1920;
+    int height = 1080;
   };
 
   static void ReportGstreamerError(GstElement* pipeline, const char* prefix) {
@@ -290,7 +299,7 @@ class HardwareVideoRecorder {
     gst_object_unref(bus);
   }
 
-  static bool OpenSession(const std::string& path, EncodingSession* session) {
+  static bool OpenSession(const std::string& path, int width, int height, EncodingSession* session) {
     if (!HasGstreamerElement("mpph264enc")) {
       std::cerr << "没有可用的硬件 H.264 编码器: 需要 mpph264enc" << std::endl;
       return false;
@@ -298,7 +307,7 @@ class HardwareVideoRecorder {
 
     const std::string pipeline_description =
         "appsrc name=video_source is-live=true format=time block=false "
-        "caps=video/x-raw,format=BGR,width=1920,height=1080,framerate=30/1 "
+        "caps=video/x-raw,format=BGR,width=" + std::to_string(session->width) + ",height=" + std::to_string(session->height) + ",framerate=30/1 "
         "! queue max-size-buffers=4 leaky=downstream "
         "! videoconvert ! video/x-raw,format=NV12 "
         "! mpph264enc bps=12000000 gop=30 rc-mode=cbr header-mode=each-idr "
@@ -308,6 +317,7 @@ class HardwareVideoRecorder {
     std::cout << "录像编码器: mpph264enc" << std::endl;
 
     GError* error = nullptr;
+    session->width = width; session->height = height;
     session->pipeline = gst_parse_launch(pipeline_description.c_str(), &error);
     if (session->pipeline == nullptr || error != nullptr) {
       std::cerr << "创建 MPP 硬件编码管线失败: "
@@ -411,7 +421,7 @@ class HardwareVideoRecorder {
 
       if (command.type == RecordCommandType::kStart) {
         CloseSession(&session);
-        if (!OpenSession(command.path, &session)) {
+        if (!OpenSession(command.path, width_, height_, &session)) {
           recording_ = false;
         }
       } else if (command.type == RecordCommandType::kFrame) {
@@ -443,6 +453,8 @@ class HardwareVideoRecorder {
   }
 
   std::atomic<bool> recording_{false};
+  int width_ = 1920;
+  int height_ = 1080;
   std::atomic<std::uint64_t> dropped_frames_{0};
   std::mutex queue_mutex_;
   std::condition_variable queue_condition_;
@@ -463,9 +475,9 @@ int main(int argc, char** argv) {
   try {
     auto camera_pipeline = std::make_shared<ob::Pipeline>();
     auto profiles = camera_pipeline->getStreamProfileList(OB_SENSOR_COLOR);
-    auto color_profile = Find1080pColorProfile(profiles);
+    auto color_profile = Find1080pColorProfile(profiles, options.width, options.height);
     if (!color_profile) {
-      std::cerr << "相机不支持 1920x1080@30fps 彩色流" << std::endl;
+      std::cerr << "相机不支持所选分辨率@30fps 彩色流" << std::endl;
       return 1;
     }
 
@@ -477,9 +489,10 @@ int main(int argc, char** argv) {
               << color_profile->height() << "@" << color_profile->fps()
               << "，S 开始录像，Q 停止录像，Esc 退出" << std::endl;
 
-    cv::namedWindow(kWindowName, cv::WINDOW_NORMAL);
-    cv::resizeWindow(kWindowName, 1280, 720);
-    HardwareVideoRecorder recorder;
+    const std::string window_name = "Orbbec " + std::to_string(options.width) + "x" + std::to_string(options.height);
+    cv::namedWindow(window_name, cv::WINDOW_NORMAL);
+    cv::resizeWindow(window_name, 1280, 720);
+    HardwareVideoRecorder recorder(options.width, options.height);
     const auto auto_record_start = std::chrono::steady_clock::now();
     bool auto_record_started = false;
 
@@ -530,7 +543,7 @@ int main(int argc, char** argv) {
         cv::putText(image, record_text, cv::Point(58, 108), cv::FONT_HERSHEY_SIMPLEX,
                     1.0, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
       }
-      cv::imshow(kWindowName, image);
+      cv::imshow(window_name, image);
       const int key = cv::waitKey(1) & 0xff;
       if (key == 's' || key == 'S') {
         recorder.Start();
