@@ -12,12 +12,14 @@ export class ApiError extends Error {
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
 
 export async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const body = init.body;
+  const isBinaryBody = typeof Blob !== "undefined" && body instanceof Blob;
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
     signal: init.signal || AbortSignal.timeout(15000),
     headers: {
       Accept: "application/json",
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      ...(body && !isBinaryBody ? { "Content-Type": "application/json" } : {}),
       ...init.headers,
     },
   });

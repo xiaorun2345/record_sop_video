@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 from . import backend
 
 router = APIRouter(prefix="/api", tags=["runtime"])
-class Start(BaseModel): resolution: str = "640x480"
+class Start(BaseModel): resolution: Optional[str] = None
+class Resolution(BaseModel): resolution: str
+class VideoSource(BaseModel):
+    type: Literal["camera", "video"]
+    uri: str = ""
 class Recording(BaseModel): mode: str = "processed"
 VISUALIZATION_DEFAULTS = {
     "hand_landmarks": True,
@@ -60,6 +64,50 @@ def _recording_file(filename: str) -> Path:
     path = backend.RECORDING_DIR / safe
     if not path.is_file(): raise HTTPException(404, "视频文件不存在")
     return path
+
+@router.get("/video-sources")
+def video_sources():
+    with backend.lock:
+        return {"items": backend.status_locked().get("local_videos", [])}
+
+@router.post("/video-sources/upload")
+async def upload_video(request: Request, filename: str = ""):
+    safe_name = Path(filename or "video.mp4").name
+    if safe_name != filename and filename:
+        raise HTTPException(400, "无效的视频文件名")
+    if Path(safe_name).suffix.lower() not in (".mp4", ".avi", ".mkv", ".mov", ".webm"):
+        raise HTTPException(400, "仅支持 MP4、AVI、MKV、MOV 或 WebM 视频")
+    if not safe_name:
+        raise HTTPException(400, "缺少视频文件名")
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "视频文件为空")
+    backend.LOCAL_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    path = backend.LOCAL_VIDEO_DIR / safe_name
+    path.write_bytes(body)
+    return {"ok": True, "filename": safe_name, "uri": str(path.resolve()), "message": "本地视频已上传"}
+
+@router.post("/video-sources/select")
+def select_video_source(value: VideoSource):
+    with backend.lock:
+        if backend.alive(backend.algorithm_proc):
+            raise HTTPException(409, "请先停止摄像头或算法，再切换输入源")
+        try:
+            backend.set_input_source(value.type, value.uri)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        return backend.status_locked()
+
+@router.delete("/video-sources/{filename}")
+def delete_video_source(filename: str):
+    safe_name = Path(filename).name
+    path = backend.LOCAL_VIDEO_DIR / safe_name
+    if safe_name != filename or path.suffix.lower() not in (".mp4", ".avi", ".mkv", ".mov", ".webm"):
+        raise HTTPException(400, "无效的视频文件名")
+    if not path.is_file():
+        raise HTTPException(404, "视频文件不存在")
+    path.unlink()
+    return {"ok": True, "filename": safe_name, "message": "本地视频已删除"}
 @router.get("/recordings")
 def recordings():
     files=[]
@@ -81,14 +129,26 @@ def status():
 @router.post("/camera/start")
 def camera_start(value: Start = Start()):
     with backend.lock:
-        backend.set_resolution(value.resolution); backend.camera_start_locked(); return backend.status_locked()
+        if value.resolution and backend.input_source_type() != "video": backend.set_resolution(value.resolution)
+        backend.camera_start_locked(); return backend.status_locked()
 @router.post("/camera/stop")
 def camera_stop():
     with backend.lock: backend.camera_stop_locked(); return backend.status_locked()
+@router.post("/camera/resolution")
+def camera_resolution(value: Resolution):
+    with backend.lock:
+        if backend.alive(backend.algorithm_proc):
+            raise HTTPException(409, "摄像头运行中不能切换分辨率，请先关闭摄像头")
+        try:
+            backend.set_resolution(value.resolution)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        return backend.status_locked()
 @router.post("/algorithm/start")
 def algorithm_start(value: Start = Start()):
     with backend.lock:
-        backend.set_resolution(value.resolution); backend.algorithm_start_locked(); return backend.status_locked()
+        if value.resolution and backend.input_source_type() != "video": backend.set_resolution(value.resolution)
+        backend.algorithm_start_locked(); return backend.status_locked()
 @router.post("/algorithm/stop")
 def algorithm_stop():
     with backend.lock: backend.algorithm_stop_locked(); return backend.status_locked()

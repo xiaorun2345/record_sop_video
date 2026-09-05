@@ -22,9 +22,11 @@ MODE_FILE = Path("/tmp/rk3588_sop_algorithm_enabled")
 RECORDING_CONTROL = Path("/tmp/rk3588_sop_recording")
 HAND_LANDMARKS_VISIBILITY = Path("/tmp/rk3588_sop_hand_landmarks_visible")
 RECORDING_DIR = ROOT / "output" / "recordings"
+LOCAL_VIDEO_DIR = ROOT / "output" / "input_videos"
 NPU_LATENCY_FILE = Path("/tmp/rk3588_sop_npu_latency_ms")
 RUNTIME_STATE_FILE = Path("/tmp/rk3588_sop_runtime_state.json")
 SOP_RESET_FILE = Path("/tmp/rk3588_sop_reset")
+VIDEO_FINISHED_FILE = Path("/tmp/rk3588_sop_video_finished")
 VISUALIZATION_DEFAULTS = {"hand_landmarks": True, "object_boxes": True, "hand_box": False, "skeleton": True, "keypoints": True, "debug_panel": True}
 lock = threading.RLock(); mediamtx_proc = None; algorithm_proc = None
 _media_paths_cache = {"sop": False, "raw": False}
@@ -38,6 +40,7 @@ MODE_FILE.unlink(missing_ok=True)
 RECORDING_CONTROL.unlink(missing_ok=True)
 RUNTIME_STATE_FILE.unlink(missing_ok=True)
 SOP_RESET_FILE.unlink(missing_ok=True)
+VIDEO_FINISHED_FILE.unlink(missing_ok=True)
 HAND_LANDMARKS_VISIBILITY.touch()
 
 class _ExistingProcess:
@@ -131,6 +134,7 @@ def start_locked():
         # systemd, a web server, or another working directory.
         runtime_lib = str(ROOT / "output/lib")
         env["LD_LIBRARY_PATH"] = runtime_lib + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
+        VIDEO_FINISHED_FILE.unlink(missing_ok=True)
         algorithm_proc = subprocess.Popen([str(ALGORITHM), str(CONFIG)], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         # Popen only means fork succeeded.  Detect immediate RKNN/USB/config
         # failures here so the browser receives a real error instead of a
@@ -154,10 +158,20 @@ def camera_stop_locked():
     stop_locked()
 
 def algorithm_start_locked():
-    if not alive(algorithm_proc):
-        start_locked()
+    global algorithm_proc
+    # For a file source, camera_start_locked() is used as video preview and the
+    # capture thread advances through the file even when algorithm processing is
+    # disabled.  Restart the algorithm process before enabling inference so each
+    # run reopens the selected recording and starts analysis from frame 1.
+    if input_source_type() == "video" and alive(algorithm_proc):
+        stop_proc(algorithm_proc)
+        algorithm_proc = None
+        SOP_RESET_FILE.unlink(missing_ok=True)
+        RUNTIME_STATE_FILE.unlink(missing_ok=True)
     SOP_RESET_FILE.touch()
     MODE_FILE.touch()
+    if not alive(algorithm_proc):
+        start_locked()
     if not _wait_for_stream("sop", 8.0):
         MODE_FILE.unlink(missing_ok=True)
         raise RuntimeError("算法进程已启动，但算法视频流未就绪，请检查 runtime_logs/algorithm.log")
@@ -174,6 +188,35 @@ def set_resolution(value):
     text = CONFIG.read_text(encoding="utf-8")
     text = re.sub(r"(?m)^input\.width=.*$", f"input.width={width}", text)
     text = re.sub(r"(?m)^input\.height=.*$", f"input.height={height}", text)
+    temporary = CONFIG.with_suffix(CONFIG.suffix + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.replace(temporary, CONFIG)
+
+def input_source_type():
+    try:
+        text = CONFIG.read_text(encoding="utf-8")
+        match = re.search(r"(?m)^input\.type=(.*)$", text)
+        return match.group(1).strip().lower() if match else "orbbec"
+    except OSError:
+        return "orbbec"
+
+def set_input_source(source_type, uri=""):
+    """Persist the input source used by the next algorithm process."""
+    source_type = str(source_type or "").strip().lower()
+    if source_type not in ("orbbec", "camera", "video"):
+        raise ValueError("输入源必须是摄像头或本地视频")
+    if source_type == "camera":
+        source_type = "orbbec"
+        uri = ""
+    if source_type == "video":
+        path = Path(str(uri)).resolve()
+        allowed_dirs = (LOCAL_VIDEO_DIR.resolve(), RECORDING_DIR.resolve())
+        if not path.is_file() or not any(directory in path.parents for directory in allowed_dirs):
+            raise ValueError("视频文件不存在或不在服务器录像目录中")
+        uri = str(path)
+    text = CONFIG.read_text(encoding="utf-8")
+    text = re.sub(r"(?m)^input\.type=.*$", f"input.type={source_type}", text)
+    text = re.sub(r"(?m)^input\.uri=.*$", f"input.uri={uri}", text)
     temporary = CONFIG.with_suffix(CONFIG.suffix + ".tmp")
     temporary.write_text(text, encoding="utf-8")
     os.replace(temporary, CONFIG)
@@ -217,8 +260,14 @@ def status_locked():
         _recordings_cache_at = now
     files = _recordings_cache
     resolution = "640x480"
+    input_type = "orbbec"
+    input_uri = ""
     try:
         text = CONFIG.read_text(encoding="utf-8")
+        input_type_match = re.search(r"(?m)^input\.type=(.*)$", text)
+        input_uri_match = re.search(r"(?m)^input\.uri=(.*)$", text)
+        if input_type_match: input_type = input_type_match.group(1).strip()
+        if input_uri_match: input_uri = input_uri_match.group(1).strip()
         width = re.search(r"(?m)^input\.width=(\d+)$", text)
         height = re.search(r"(?m)^input\.height=(\d+)$", text)
         if width and height: resolution = f"{width.group(1)}x{height.group(1)}"
@@ -226,7 +275,42 @@ def status_locked():
         pass
     media_running = alive(mediamtx_proc) or port_open(1935)
     visuals = visualization_status()
-    return {"camera": "running" if camera_running else "stopped", "algorithm": "running" if algorithm_running else "stopped", "mediamtx": "running" if media_running else "stopped", "mediaMtx": "running" if media_running else "stopped", "raw_stream": f"http://{host}:8889/raw/", "stream": f"http://{host}:8889/sop/", "raw_stream_ready": raw_ready, "stream_ready": stream_ready, "rawStreamReady": raw_ready, "streamReady": stream_ready, "streamPath": "raw", "webrtcPort": 8889, "resolution": resolution, "algorithm_pid": algorithm_proc.pid if camera_running else None, "cameraPid": algorithm_proc.pid if camera_running else None, "fps": fps, "npu_latency_ms": read_number(NPU_LATENCY_FILE), "cpu_temperature_c": cpu_temperature_c(), "recording": mode or "stopped", "recording_dir": str(RECORDING_DIR), "recordings": files[:20], "latest_recording": files[0] if files else None, "hand_landmarks_visible": visuals["hand_landmarks"], "visualization": visuals}
+    local_videos = []
+    if LOCAL_VIDEO_DIR.exists():
+        for path in sorted(LOCAL_VIDEO_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            if path.is_file() and path.suffix.lower() in (".mp4", ".avi", ".mkv", ".mov", ".webm"):
+                local_videos.append(path.name)
+    return {
+        "camera": "running" if camera_running else "stopped",
+        "algorithm": "running" if algorithm_running else "stopped",
+        "video_finished": VIDEO_FINISHED_FILE.exists(),
+        "mediamtx": "running" if media_running else "stopped",
+        "mediaMtx": "running" if media_running else "stopped",
+        "raw_stream": f"http://{host}:8889/raw/",
+        "stream": f"http://{host}:8889/sop/",
+        "raw_stream_ready": raw_ready,
+        "stream_ready": stream_ready,
+        "rawStreamReady": raw_ready,
+        "streamReady": stream_ready,
+        "streamPath": "raw",
+        "webrtcPort": 8889,
+        "resolution": resolution,
+        "resolutions": ["1920x1080", "640x480"],
+        "input_type": input_type,
+        "input_uri": input_uri,
+        "local_videos": local_videos[:50],
+        "algorithm_pid": algorithm_proc.pid if camera_running else None,
+        "cameraPid": algorithm_proc.pid if camera_running else None,
+        "fps": fps,
+        "npu_latency_ms": read_number(NPU_LATENCY_FILE),
+        "cpu_temperature_c": cpu_temperature_c(),
+        "recording": mode or "stopped",
+        "recording_dir": str(RECORDING_DIR),
+        "recordings": files[:20],
+        "latest_recording": files[0] if files else None,
+        "hand_landmarks_visible": visuals["hand_landmarks"],
+        "visualization": visuals,
+    }
 
 def _wait_for_stream(path_name, timeout):
     deadline = time.time() + timeout
@@ -262,7 +346,7 @@ class Handler(BaseHTTPRequestHandler):
         extra = device_api.handle_get(self.path) or system_api.handle_get(self.path)
         if extra is not None:
             self.send_json(*extra)
-        elif self.path in ("/api/algorithm/status", "/api/recording/status"):
+        elif self.path in ("/api/algorithm/status", "/api/recording/status", "/api/camera/status"):
             with lock: self.send_json(200, status_locked())
         elif self.path in ("/", "/index.html", "/app.js", "/styles.css", "/device.html", "/device.js", "/device.css", "/settings.html", "/settings.js", "/settings.css"):
             name = "index.html" if self.path in ("/", "/index.html") else self.path.lstrip("/")
@@ -278,8 +362,12 @@ class Handler(BaseHTTPRequestHandler):
             extra = device_api.handle_post(self.path, payload) or system_api.handle_post(self.path, payload)
             if extra is not None:
                 self.send_json(*extra); return
-            if self.path in ("/api/camera/start", "/api/algorithm/start"):
-                if payload.get("resolution"):
+            if self.path == "/api/camera/resolution":
+                with lock:
+                    if alive(algorithm_proc): raise ValueError("摄像头运行中不能切换分辨率，请先关闭摄像头")
+                    set_resolution(payload.get("resolution", "")); result = status_locked()
+            elif self.path in ("/api/camera/start", "/api/algorithm/start"):
+                if payload.get("resolution") and input_source_type() != "video":
                     set_resolution(payload["resolution"])
                 with lock:
                     if self.path == "/api/camera/start": camera_start_locked()

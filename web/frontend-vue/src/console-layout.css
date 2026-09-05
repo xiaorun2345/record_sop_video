@@ -1274,33 +1274,156 @@ hr,
   background: linear-gradient(180deg, rgba(7, 24, 43, 0.98), rgba(3, 14, 27, 0.96)) !important;
 }
 
-/* Workbench right rail: keep each status/control row on its own line. */
-.workbench .job-card {
-  min-width: 0;
-  max-height: calc(100vh - 132px);
-  overflow-y: auto;
-  overflow-x: hidden;
+.runtime-alert {
+  display: grid;
+  gap: 6px;
+  color: #ffd6a3 !important;
+  background: linear-gradient(180deg, rgba(92, 39, 12, 0.90), rgba(48, 20, 10, 0.86)) !important;
+  border: 1px solid rgba(251, 146, 60, 0.52) !important;
+  box-shadow: 0 0 26px rgba(251, 146, 60, 0.16), inset 0 0 18px rgba(251, 146, 60, 0.06) !important;
 }
-.workbench .sop-runtime-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.workbench .runtime-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
-.workbench .runtime-checks { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 16px; }
-.workbench .runtime-check { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 4px 7px; width: 100%; min-height: 42px; padding: 8px 9px; }
-.workbench .runtime-check small { grid-column: 2 / -1; min-width: 0; overflow-wrap: anywhere; }
-.workbench .runtime-step-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; width: 100%; }
-.workbench .runtime-step-list span { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; }
-.workbench .runtime-step-list span b { flex: 0 0 auto; }
-.workbench .visualization-controls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; width: 100%; margin-top: 18px; padding-top: 14px; }
-.workbench .visualization-controls > label { display: flex; width: 100%; min-height: 30px; align-items: center; justify-content: space-between; gap: 12px; }
-.workbench .visualization-controls > label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workbench .visualization-controls > label > i { flex: 0 0 34px; }
-.workbench .visualization-controls input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.workbench .visualization-controls > label > i { position: relative; display: block; height: 18px; border-radius: 999px; background: rgba(100,125,150,.45); }
-.workbench .visualization-controls > label > i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #b4c7d7; transition: .18s; }
-.workbench .visualization-controls > label:has(input:checked) > i { background: rgba(32,230,255,.72); box-shadow: 0 0 12px rgba(32,230,255,.24); }
-.workbench .visualization-controls > label:has(input:checked) > i::after { left: 18px; background: #f1ffff; }
-.workbench .landmark { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
-.workbench .runtime-reset { display: block; width: 100%; }
 
-@media (max-width: 1200px) {
-  .workbench .job-card { max-height: none; overflow: visible; }
+.runtime-alert strong {
+  color: #fff1d6 !important;
+}
+
+.runtime-alert small {
+  color: #ffc875 !important;
+}
+
+/* Workbench visualization controls: one full-width row per switch. */
+.app-shell .workbench .visualization-controls {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 8px !important;
+  width: 100% !important;
+}
+.app-shell .workbench .visualization-controls > label {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  width: 100% !important;
+  min-height: 34px !important;
+  margin: 0 !important;
+  padding: 5px 0 !important;
+}
+.app-shell .workbench .visualization-controls > label > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-shell .workbench .visualization-controls input[type="checkbox"] {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.app-shell .workbench .visualization-controls > label > i {
+  position: relative !important;
+  display: block !important;
+  flex: 0 0 38px !important;
+  width: 38px !important;
+  height: 22px !important;
+  border-radius: 999px !important;
+  background: rgba(100,125,150,.55) !important;
+  transition: .18s ease !important;
+}
+.app-shell .workbench .visualization-controls > label > i::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #d7e6ef;
+  transition: .18s ease;
+}
+.app-shell .workbench .visualization-controls > label:has(input[type="checkbox"]:checked) > i {
+  background: #126de9 !important;
+  box-shadow: 0 0 12px rgba(18,109,233,.32) !important;
+}
+.app-shell .workbench .visualization-controls > label:has(input[type="checkbox"]:checked) > i::after {
+  left: 19px;
+  background: #fff;
+}
+
+/* Compact, readable SOP status card. Object status is based on bestCount,
+   i.e. the maximum count seen so far in the video, rather than this frame. */
+.app-shell .workbench > .work-grid > .job-card {
+  font-family: "Inter", "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.app-shell .workbench .job-card > h2 {
+  margin: 0 0 20px !important;
+  color: #eaf8ff !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  letter-spacing: .02em;
+}
+.app-shell .workbench .sop-runtime-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.app-shell .workbench .step-current {
+  color: #f3fbff !important;
+  font-size: 20px !important;
+  line-height: 1.3;
+  font-weight: 700 !important;
+}
+.app-shell .workbench .sop-runtime-head p {
+  margin: 5px 0 0 !important;
+  color: #85a8bd !important;
+  font-size: 12px !important;
+}
+.app-shell .workbench .runtime-chip {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid rgba(32,230,255,.28);
+  border-radius: 999px;
+  color: #9defff !important;
+  font-size: 12px;
+  font-weight: 600;
+}
+.app-shell .workbench .runtime-checks {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 5px !important;
+  margin-top: 14px !important;
+}
+.app-shell .workbench .runtime-check {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 6px 9px !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(125,180,210,.12) !important;
+  background: transparent !important;
+}
+.app-shell .workbench .runtime-check strong {
+  color: #d4e7f2 !important;
+  font-size: 13px;
+  font-weight: 600;
+}
+.app-shell .workbench .runtime-check em {
+  color: #829daf !important;
+  font-size: 11px;
+  font-style: normal;
+}
+.app-shell .workbench .runtime-check.ok strong {
+  color: #55e6a0 !important;
+}
+.app-shell .workbench .runtime-check.ok em {
+  color: #55e6a0 !important;
+}
+.app-shell .workbench .runtime-check:not(.ok) strong {
+  color: #d4e7f2 !important;
+}
+.app-shell .workbench .runtime-check small {
+  display: none !important;
 }

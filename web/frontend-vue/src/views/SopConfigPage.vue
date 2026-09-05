@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import {
   ArrowRight,
@@ -28,6 +28,7 @@ import { useCameraStream } from "@/composables/useCameraStream";
 import { polygonPoints, useRoiEditor } from "@/composables/useRoiEditor";
 import type { RequiredObject, RequiredObjectRelation, SopDefinition, SopExecutionMode } from "@/types/sop";
 import SopSummaryCard from "@/components/sop/SopSummaryCard.vue";
+import { getRecordings, selectVideoSource, setCameraResolution, type RecordingItem } from "@/api/camera";
 
 const sopStore = useSopStore();
 const {
@@ -69,7 +70,20 @@ const {
   updateVideoMetadata,
   startCamera,
   stopCamera,
+  selectedResolution,
 } = useCameraStream();
+const inputSource = ref<"camera" | "video">("camera");
+const localVideoUri = ref("");
+const localVideoName = ref("");
+const recordedVideos = ref<RecordingItem[]>([]);
+const sourceBusy = ref(false);
+const sourceSelectionPending = ref(false);
+watch(cameraStatus, (status) => {
+  if (!status || sourceSelectionPending.value) return;
+  inputSource.value = status.input_type === "video" ? "video" : "camera";
+  localVideoUri.value = status.input_uri || "";
+  localVideoName.value = localVideoUri.value.split("/").pop() || "";
+}, { immediate: true });
 const roiViewBox = computed(() => `0 0 ${videoWidth.value || 1} ${videoHeight.value || 1}`);
 const roiPointRadius = computed(() => Math.max(1, Math.min(videoWidth.value || 100, videoHeight.value || 100) * 0.011));
 const requiredObjectDialogVisible = ref(false);
@@ -123,6 +137,7 @@ const {
 
 onMounted(() => {
   void sopStore.initialize().catch((error) => ElMessage.error(getErrorMessage(error)));
+  void loadRecordedVideos();
 });
 
 const filteredSteps = computed(() => {
@@ -450,10 +465,80 @@ function handleRelationTargetChange(value: string) {
 }
 
 async function handleCameraStart() {
-  const error = await startCamera();
+  const error = await startCamera(selectedResolution.value);
   if (error) ElMessage.error(error);
-  else ElMessage.success("摄像头已打开");
+  else ElMessage.success(inputSource.value === "video" ? "服务器录像已打开" : "摄像头已打开");
 }
+
+async function handleResolutionChange() {
+  if (cameraRunning.value) return;
+  try {
+    const status = await setCameraResolution(selectedResolution.value);
+    selectedResolution.value = status.resolution || selectedResolution.value;
+    ElMessage.success(`分辨率已设置为 ${selectedResolution.value}`);
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error));
+  }
+}
+
+function recordingUri(filename: string) {
+  return `/home/armsom/record_sop_video/output/recordings/${filename}`;
+}
+
+async function loadRecordedVideos() {
+  try {
+    recordedVideos.value = (await getRecordings()).items || [];
+    if (inputSource.value === "video" && !recordedVideos.value.some((item) => recordingUri(item.filename) === localVideoUri.value)) {
+      localVideoUri.value = "";
+      localVideoName.value = "";
+    }
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error));
+  }
+}
+
+async function selectInputSource(type: "camera" | "video", uri = "") {
+  if (type === "video" && !uri) {
+    ElMessage.warning("请先选择服务器录像");
+    return;
+  }
+  sourceBusy.value = true;
+  try {
+    if (cameraRunning.value) await stopCamera();
+    await selectVideoSource(type, uri);
+    sourceSelectionPending.value = false;
+    inputSource.value = type;
+    localVideoUri.value = uri;
+    localVideoName.value = uri.split("/").pop() || "";
+    ElMessage.success(type === "video" ? "已选择服务器录像" : "已切换到主相机");
+  } catch (error) {
+    sourceSelectionPending.value = false;
+    ElMessage.error(getErrorMessage(error));
+  } finally { sourceBusy.value = false; }
+}
+
+async function handleInputSourceChange(type: "camera" | "video") {
+  sourceSelectionPending.value = true;
+  if (type === "video") {
+    await loadRecordedVideos();
+    if (!localVideoUri.value) {
+      ElMessage.info("请先选择服务器录像");
+      return;
+    }
+  }
+  await selectInputSource(type, type === "video" ? localVideoUri.value : "");
+}
+
+async function handleRecordedVideoChange(uri: string) {
+  if (!uri) return;
+  sourceSelectionPending.value = true;
+  await selectInputSource("video", uri);
+}
+
+function handleRecordingDropdownVisible(visible: boolean) {
+  if (visible) void loadRecordedVideos();
+}
+
 
 async function handleCameraStop() {
   const error = await stopCamera();
@@ -593,7 +678,7 @@ function getErrorMessage(error: unknown) {
                       <span class="video-empty-icon"><el-icon><VideoCamera /></el-icon></span>
                       <strong>摄像头未打开</strong>
                       <p>{{ streamError || '打开 RK3588 摄像头后，将在这里显示实时视频流' }}</p>
-                      <el-button type="primary" :loading="cameraBusy" @click="handleCameraStart">打开摄像头</el-button>
+                      <el-button type="primary" :loading="cameraBusy" @click="handleCameraStart">{{ inputSource === 'video' ? '播放录像' : '打开摄像头' }}</el-button>
                     </div>
                     <div v-if="cameraRunning" class="camera-status"><span></span>{{ streamReady ? '实时画面' : '连接中' }}</div>
                     <div v-if="roiSelectionActive" class="roi-drawing-banner">
@@ -668,8 +753,40 @@ function getErrorMessage(error: unknown) {
                     <dt>传输协议</dt><dd>WebRTC（WHEP）</dd>
                     <dt>流服务</dt><dd>{{ cameraStatus?.mediaMtx === 'running' ? '已连接' : '未连接' }}</dd>
                   </dl>
+                  <div class="camera-source-controls">
+                    <label>输入源
+                      <el-select v-model="inputSource" :disabled="sourceBusy || cameraRunning" size="small" @change="handleInputSourceChange(inputSource)">
+                        <el-option label="主相机" value="camera" />
+                        <el-option label="服务器录像" value="video" />
+                      </el-select>
+                    </label>
+                    <label v-if="inputSource === 'video'">服务器录像
+                      <el-select
+                        v-model="localVideoUri"
+                        :disabled="sourceBusy || cameraRunning"
+                        placeholder="选择已录制视频"
+                        size="small"
+                        filterable
+                        @visible-change="handleRecordingDropdownVisible"
+                        @change="handleRecordedVideoChange"
+                      >
+                        <el-option
+                          v-for="item in recordedVideos"
+                          :key="item.filename"
+                          :label="item.filename"
+                          :value="recordingUri(item.filename)"
+                        />
+                      </el-select>
+                    </label>
+                    <label v-if="inputSource === 'camera'">启动分辨率
+                      <el-select v-model="selectedResolution" :disabled="sourceBusy || cameraRunning" size="small" @change="handleResolutionChange">
+                        <el-option label="1920 × 1080" value="1920x1080" />
+                        <el-option label="640 × 480" value="640x480" />
+                      </el-select>
+                    </label>
+                  </div>
                   <div class="camera-info-actions">
-                    <el-button type="primary" :loading="cameraBusy && !cameraRunning" :disabled="cameraRunning" @click="handleCameraStart">打开摄像头</el-button>
+                    <el-button type="primary" :loading="cameraBusy && !cameraRunning" :disabled="cameraRunning" @click="handleCameraStart">{{ inputSource === 'video' ? '播放录像' : '打开摄像头' }}</el-button>
                     <el-button :loading="cameraBusy && cameraRunning" :disabled="!cameraRunning" @click="handleCameraStop">关闭摄像头</el-button>
                   </div>
                 </aside>

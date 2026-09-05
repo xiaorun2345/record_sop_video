@@ -503,18 +503,19 @@ bool ProcessFrame(RgbdFrame* rgbd_frame, const VideoSource& source, Yolov8Detect
                               .count();
   }
 
-  const bool two_hands_alert = result.hands.size() >= 2;
+  const bool sop_alert = !state_machine->state().alerts.empty();
   if (serial_light != nullptr) {
-    serial_light->SetAlert(two_hands_alert);
+    serial_light->SetAlert(sop_alert);
   }
-  static bool previous_two_hands_alert = false;
-  static auto last_two_hands_log = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+  static bool previous_sop_alert = false;
+  static auto last_sop_alert_log = std::chrono::steady_clock::now() - std::chrono::seconds(10);
   const auto now_for_alert = std::chrono::steady_clock::now();
-  if (two_hands_alert && (!previous_two_hands_alert || now_for_alert - last_two_hands_log >= std::chrono::seconds(5))) {
-    std::cout << "[warning] two_hands: 检测到 2 个手部目标，触发串口报警灯" << std::endl;
-    last_two_hands_log = now_for_alert;
+  if (sop_alert && (!previous_sop_alert || now_for_alert - last_sop_alert_log >= std::chrono::seconds(5))) {
+    const SopAlert& alert = state_machine->state().alerts.front();
+    std::cout << "[warning] sop_alert: " << alert.message << "，触发串口报警灯" << std::endl;
+    last_sop_alert_log = now_for_alert;
   }
-  previous_two_hands_alert = two_hands_alert;
+  previous_sop_alert = sop_alert;
   return true;
 }
 
@@ -554,9 +555,10 @@ int main(int argc, char** argv) {
   SerialLightController serial_light(config.serial_light.device_path, config.serial_light.baud_rate);
   SerialLightController* serial_light_ptr = nullptr;
   if (config.serial_light.enabled) {
-    serial_light_ptr = &serial_light;
-    if (!serial_light.Open()) {
-      std::cerr << "串口报警灯不可用，SOP 主流程继续运行" << std::endl;
+    if (serial_light.Open()) {
+      serial_light_ptr = &serial_light;
+    } else {
+      std::cerr << "串口报警灯不可用，仅保留前端 SOP 预警" << std::endl;
     }
   }
   bool show_window = config.show_window;
@@ -570,6 +572,7 @@ int main(int argc, char** argv) {
   bool state_initialized_from_frame = false;
   std::error_code runtime_state_error;
   std::filesystem::remove("/tmp/rk3588_sop_runtime_state.json", runtime_state_error);
+  std::filesystem::remove("/tmp/rk3588_sop_video_finished", runtime_state_error);
   const std::filesystem::path sop_reset_file = "/tmp/rk3588_sop_reset";
   std::error_code config_time_error;
   auto config_write_stamp = std::filesystem::last_write_time(config_path, config_time_error);
@@ -644,6 +647,14 @@ int main(int argc, char** argv) {
     while (!capture_stop.load()) {
       RgbdFrame captured;
       if (!source.ReadRgbd(&captured)) {
+        if (config.input.type == "video") {
+          std::cerr << "本地视频分析已到达文件末尾或无法继续读取，结束处理" << std::endl;
+          std::ofstream finished_file("/tmp/rk3588_sop_video_finished", std::ios::trunc);
+          if (finished_file) finished_file << "1\n";
+          capture_stop.store(true);
+          latest_cv.notify_all();
+          break;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
         continue;
       }

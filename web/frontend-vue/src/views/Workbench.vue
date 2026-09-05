@@ -13,7 +13,21 @@
             <span v-if="streamMessage" class="stream-message">{{ streamMessage }}</span>
           </div>
           <div class="actions">
-            <button @click="camera('start')" :disabled="busy || status.camera === 'running'">启动摄像头</button>
+            <label class="source-picker">输入源
+              <select v-model="inputSource" :disabled="busy || status.camera === 'running'" @change="handleInputSourceChange">
+                <option value="camera">主相机</option><option value="video">服务器录像</option>
+              </select>
+            </label>
+            <label v-if="inputSource === 'camera'" class="source-picker">分辨率
+              <select v-model="selectedResolution" :disabled="busy || status.camera === 'running'" @change="changeResolution"><option value="1920x1080">1920 × 1080</option><option value="640x480">640 × 480</option></select>
+            </label>
+            <label v-else class="source-picker recording-picker">服务器录像
+              <select v-model="inputUri" :disabled="busy || status.camera === 'running'" @change="chooseRecordedVideo">
+                <option value="">选择已录制视频</option>
+                <option v-for="item in videos" :key="item.filename" :value="recordingUri(item.filename)">{{ item.filename }}</option>
+              </select>
+            </label>
+            <button @click="camera('start')" :disabled="busy || status.camera === 'running'">{{ inputSource === 'video' ? '播放服务器录像' : '启动摄像头' }}</button>
             <button @click="camera('stop')" :disabled="busy || status.camera !== 'running'">关闭摄像头</button>
             <button @click="algorithm('start')" :disabled="busy || status.camera !== 'running' || status.algorithm === 'running'">启动算法</button>
             <button @click="algorithm('stop')" :disabled="busy || status.algorithm !== 'running'">关闭算法</button>
@@ -34,15 +48,24 @@
           <div class="progress"><i :style="{ width: `${progress}%` }"></i></div>
           <div class="runtime-meta"><span>步骤耗时 {{ Number(currentLiveStep.elapsedSec || 0).toFixed(1) }}s</span><span>确认 {{ currentLiveStep.confirmCount }} / {{ currentLiveStep.confirmTarget }} 帧</span></div>
           <div class="runtime-checks">
-            <div v-for="item in currentLiveStep.objects" :key="item.id || item.label" class="runtime-check" :class="{ ok: item.satisfiedNow }">
-              <span>{{ item.satisfiedNow ? '✓' : '✕' }}</span><strong>{{ item.label }}</strong><em>{{ item.currentCount }} / {{ item.requiredCount }}</em>
-              <small>{{ item.reason }}</small>
+            <div v-for="item in currentLiveStep.objects" :key="item.id || item.label" class="runtime-check" :class="{ ok: Number(item.bestCount || 0) >= Number(item.requiredCount || 0) }">
+              <strong>{{ item.label }}</strong><em>{{ item.bestCount || item.currentCount || 0 }} / {{ item.requiredCount }}</em>
             </div>
-            <div v-if="currentLiveStep.handRoiConfigured" class="runtime-check" :class="{ ok: currentLiveStep.handRoiSatisfied }"><span>{{ currentLiveStep.handRoiSatisfied ? '✓' : '✕' }}</span><strong>手部作业区域</strong><em>{{ currentLiveStep.handRoiSatisfied ? '已进入' : '未进入' }}</em></div>
-            <div v-if="!currentLiveStep.spatialSatisfied" class="runtime-check"><span>✕</span><strong>手物空间距离</strong><em>未满足</em></div>
+            <div v-if="currentLiveStep.handRoiConfigured" class="runtime-check" :class="{ ok: currentLiveStep.handRoiSatisfied }"><strong>手部作业区域</strong><em>{{ currentLiveStep.handRoiSatisfied ? '已满足' : '待满足' }}</em></div>
+            <div v-if="!currentLiveStep.spatialSatisfied" class="runtime-check"><strong>手物空间距离</strong><em>待满足</em></div>
             <div v-if="!currentLiveStep.objects?.length" class="runtime-empty">当前步骤没有可判断的必检对象</div>
           </div>
-          <div v-if="runtimeState.alerts?.length" class="runtime-alert">{{ runtimeState.alerts[0].message }}</div>
+          <div v-if="runtimeState.alerts?.length" class="runtime-alert"><strong>{{ runtimeState.alerts[0].message }}</strong><small>{{ alarmLight.connected ? "已触发串口报警灯" : "报警灯未连接，已在页面预警" }}</small></div>
+          <div v-if="videoAnalysisEnded" class="shipment-result" :class="{ ok: !missingShipmentItems.length }">
+            <strong>{{ missingShipmentItems.length ? "视频分析结束，发现漏发货" : "视频分析结束，未发现漏发货" }}</strong>
+            <p v-if="missingShipmentItems.length">以下物品未达到本次发货要求数量：</p>
+            <div v-if="missingShipmentItems.length" class="missing-list">
+              <span v-for="item in missingShipmentItems" :key="`${item.stepId}-${item.label}`">
+                {{ item.name }} <b>{{ item.bestCount }} / {{ item.requiredCount }}</b>
+              </span>
+            </div>
+            <small v-else>所有必检物品均已在视频中识别到要求数量。</small>
+          </div>
         </template>
         <template v-else-if="sopRuntime.active && runtimeState.finished"><div class="step-current">SOP 已全部完成</div><p>全部启用步骤均已满足判断条件。</p></template>
         <template v-else-if="sopRuntime.active"><div class="step-current">等待算法处理</div><p>请启动算法，工作台将显示检测框对应的实时判定结果。</p></template>
@@ -63,23 +86,38 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { api, post, request } from "../api";
 import Metric from "../components/Metric.vue";
+import { selectVideoSource, setCameraResolution } from "../api/camera";
 
-const video = ref(null); const status = ref({}); const sopRuntime = ref({ active: false }); const runtimeState = ref({});
+const video = ref(null); const status = ref({}); const sopRuntime = ref({ active: false }); const runtimeState = ref({}); const alarmLight = ref({ connected: false });
 const visualization = ref({ hand_landmarks: true, object_boxes: true, hand_box: false, skeleton: true, keypoints: true, debug_panel: true });
 const landmarks = ref(true); const recordingOn = ref(false); const history = ref(false); const videos = ref([]);
 const message = ref(""); const streamMessage = ref(""); const busy = ref(false);
+const selectedResolution = ref("640x480"); const inputSource = ref("camera"); const inputUri = ref(""); const inputName = ref("");
+const sourceSelectionPending = ref(false);
 const visualizationItems = [{ key: "object_boxes", label: "目标检测框" }, { key: "hand_box", label: "手部检测框" }, { key: "skeleton", label: "手部骨骼约束" }, { key: "keypoints", label: "21 个关键点" }, { key: "debug_panel", label: "算法调试面板" }];
 const liveSteps = computed(() => runtimeState.value.steps || []);
 const currentLiveStep = computed(() => liveSteps.value.find((step) => step.index === runtimeState.value.currentStepIndex) || liveSteps.value.find((step) => !step.completed));
 const progress = computed(() => { if (!liveSteps.value.length) return 0; const completed = liveSteps.value.filter((step) => step.completed).length; return Math.round((completed / liveSteps.value.length) * 100); });
+const videoAnalysisEnded = computed(() => inputSource.value === "video" && status.value.video_finished && liveSteps.value.length > 0 && runtimeState.value.frameId > 0);
+const missingShipmentItems = computed(() => liveSteps.value.flatMap((step) => (step.objects || []).map((item) => {
+  const bestCount = Math.max(Number(item.bestCount || 0), Number(item.currentCount || 0));
+  return { stepId: step.id, label: item.label, name: shipmentLabel(item.label), bestCount, requiredCount: Number(item.requiredCount || 0) };
+})).filter((item) => item.bestCount < item.requiredCount));
 let timer; let peer = null; let connecting = false; let connectGeneration = 0;
 
+const shipmentLabels = { cover_cloth: "盖布", long_handle: "长柄", manual: "说明书", padding_board: "垫板", small_red_lever: "小红杆", top_pad: "上垫", vertical_support_bracket: "竖向支撑架" };
+function shipmentLabel(label) { return shipmentLabels[label] || label; }
 const notify = (text) => { message.value = text; window.setTimeout(() => { message.value = ""; }, 2500); };
 
 async function sync() {
   try {
-    const [nextStatus, nextRuntime, nextState] = await Promise.all([request("/api/algorithm/status"), request("/api/sop/runtime"), request("/api/sop/runtime/state")]);
-    status.value = nextStatus; sopRuntime.value = nextRuntime; runtimeState.value = nextState;
+    const [nextStatus, nextRuntime, nextState, nextAlarmLight] = await Promise.all([request("/api/algorithm/status"), request("/api/sop/runtime"), request("/api/sop/runtime/state"), request("/api/peripherals/alarm-light")]);
+    status.value = nextStatus; sopRuntime.value = nextRuntime; runtimeState.value = nextState; alarmLight.value = nextAlarmLight;
+    selectedResolution.value = status.value.resolution || selectedResolution.value;
+    if (!sourceSelectionPending.value) {
+      inputSource.value = status.value.input_type === "video" ? "video" : "camera";
+      inputUri.value = status.value.input_uri || ""; inputName.value = inputUri.value.split("/").pop() || "";
+    }
     if (status.value.visualization) visualization.value = { ...visualization.value, ...status.value.visualization };
     landmarks.value = visualization.value.hand_box && visualization.value.skeleton && visualization.value.keypoints;
     if (status.value.camera !== "running") closeStream();
@@ -89,15 +127,53 @@ async function sync() {
 
 async function camera(action) {
   busy.value = true; if (action === "stop") closeStream();
-  try { status.value = await post(`/api/camera/${action}`, { resolution: "640x480" }); notify(action === "start" ? "摄像头已启动" : "摄像头已关闭"); await sync(); }
+  const options = inputSource.value === "video" ? {} : { resolution: selectedResolution.value };
+  try { status.value = await post(`/api/camera/${action}`, options); notify(action === "start" ? (inputSource.value === "video" ? "服务器录像已打开" : "摄像头已启动") : "输入源已关闭"); await sync(); }
   catch (error) { notify(error.message); } finally { busy.value = false; }
+}
+
+async function changeResolution() {
+  if (status.value.camera === "running") return;
+  try {
+    status.value = await setCameraResolution(selectedResolution.value);
+    selectedResolution.value = status.value.resolution || selectedResolution.value;
+    notify(`分辨率已设置为 ${selectedResolution.value}`);
+  } catch (error) {
+    notify(error?.message || "分辨率设置失败");
+    await sync();
+  }
 }
 
 async function algorithm(action) {
   busy.value = true;
-  try { status.value = await post(`/api/algorithm/${action}`, { resolution: "640x480" }); notify(action === "start" ? "算法已启动" : "算法已关闭"); closeStream(); await sync(); }
+  const options = inputSource.value === "video" ? {} : { resolution: selectedResolution.value };
+  try { status.value = await post(`/api/algorithm/${action}`, options); notify(action === "start" ? "算法已启动" : "算法已关闭"); closeStream(); await sync(); }
   catch (error) { notify(error.message); } finally { busy.value = false; }
 }
+
+async function changeInputSource() {
+  if (status.value.camera === "running") { notify("请先关闭摄像头"); return; }
+  if (inputSource.value === "video" && !inputUri.value) { notify("请先选择服务器录像"); return; }
+  try {
+    status.value = await selectVideoSource(inputSource.value === "video" ? "video" : "camera", inputSource.value === "video" ? inputUri.value : "");
+    sourceSelectionPending.value = false;
+    notify(inputSource.value === "video" ? "已选择服务器录像" : "已切换到主相机");
+  } catch (error) { sourceSelectionPending.value = false; notify(error?.message || "输入源切换失败"); await sync(); }
+}
+
+async function handleInputSourceChange() {
+  sourceSelectionPending.value = true;
+  if (inputSource.value === "video" && !inputUri.value) {
+    inputName.value = "";
+    notify("请选择要分析的服务器录像");
+    return;
+  }
+  if (inputSource.value === "camera") { inputUri.value = ""; inputName.value = ""; }
+  await changeInputSource();
+}
+
+function recordingUri(filename) { return `/home/armsom/record_sop_video/output/recordings/${filename}`; }
+async function chooseRecordedVideo() { inputName.value = inputUri.value.split("/").pop() || ""; if (inputUri.value) await changeInputSource(); }
 
 async function connectStream(current) {
   if (connecting || !video.value || current.camera !== "running") return;
@@ -122,7 +198,7 @@ async function setVisualization(key, enabled) { try { visualization.value = awai
 async function resetSopRuntime() { try { await post("/api/sop/runtime/reset"); runtimeState.value = {}; notify("SOP 已请求重新开始"); } catch (error) { notify(error.message); } }
 function stateLabel(state) { return ({ waiting: "等待条件", confirming: "确认中", completed: "已完成", timeout: "已超时", stale: "数据过期", finished: "全部完成" })[state] || state || "等待中"; }
 async function recording() { busy.value = true; try { status.value = await post(`/api/recording/${recordingOn.value ? "stop" : "start"}`, { mode: "processed" }); recordingOn.value = !recordingOn.value; notify(recordingOn.value ? "已开始录制" : "录像已保存"); } catch (error) { notify(error.message); } finally { busy.value = false; } }
-async function loadVideos() { try { videos.value = (await request("/api/recordings")).items || []; } catch (error) { notify(error.message); } }
+async function loadVideos() { try { videos.value = (await request("/api/recordings")).items || []; if (inputSource.value === "video" && !videos.value.some((item) => recordingUri(item.filename) === inputUri.value)) { inputUri.value = ""; inputName.value = ""; } } catch (error) { notify(error.message); } }
 function download(filename) { const anchor = document.createElement("a"); anchor.href = `${api}/api/recordings/${encodeURIComponent(filename)}/download`; anchor.download = filename; anchor.click(); }
 async function remove(filename) { if (!confirm(`确认删除 ${filename}？`)) return; await fetch(`${api}/api/recordings/${encodeURIComponent(filename)}`, { method: "DELETE" }); await loadVideos(); }
 onMounted(async () => { void sync(); void loadVideos(); try { visualization.value = await request("/api/visualization/settings"); landmarks.value = handOverlaysEnabled.value; } catch (_) {} timer = window.setInterval(() => void sync(), 500); });

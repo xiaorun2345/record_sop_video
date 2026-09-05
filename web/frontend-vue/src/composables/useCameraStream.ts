@@ -6,6 +6,7 @@ const STATUS_INTERVAL_MS = 2_000;
 const STREAM_WAIT_TIMEOUT_MS = 30_000;
 
 export function useCameraStream() {
+  const selectedResolution = ref("640x480");
   const videoElement = ref<HTMLVideoElement | null>(null);
   const cameraStatus = ref<CameraStatus | null>(null);
   const cameraBusy = ref(false);
@@ -28,12 +29,13 @@ export function useCameraStream() {
     return "已关闭";
   });
 
-  async function startCamera(): Promise<string | null> {
+  async function startCamera(resolution = selectedResolution.value): Promise<string | null> {
     if (cameraBusy.value || cameraRunning.value) return null;
     cameraBusy.value = true;
     streamError.value = "";
     try {
-      applyStatus(await requestCameraStart("640x480"));
+      selectedResolution.value = resolution;
+      applyStatus(await requestCameraStart(resolution));
       await nextTick();
       await waitForRawStream();
       return null;
@@ -163,6 +165,7 @@ export function useCameraStream() {
 
   function applyStatus(status: CameraStatus) {
     cameraStatus.value = status;
+    if (status.resolution) selectedResolution.value = status.resolution;
   }
 
   onMounted(() => {
@@ -187,6 +190,7 @@ export function useCameraStream() {
     videoReady,
     videoWidth,
     videoHeight,
+    selectedResolution,
     startCamera,
     stopCamera,
     updateVideoMetadata,

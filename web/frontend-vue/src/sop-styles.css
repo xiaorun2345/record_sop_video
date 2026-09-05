@@ -1544,3 +1544,48 @@ button {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Workbench shipment video result */
+.shipment-result {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(255, 84, 104, 0.42);
+  border-radius: 14px;
+  color: #ffd6dc;
+  background: linear-gradient(135deg, rgba(111, 17, 35, 0.72), rgba(25, 42, 69, 0.78));
+  box-shadow: 0 0 24px rgba(255, 71, 104, 0.16);
+}
+.shipment-result.ok {
+  border-color: rgba(35, 220, 153, 0.38);
+  color: #caffec;
+  background: linear-gradient(135deg, rgba(7, 88, 78, 0.68), rgba(18, 48, 82, 0.76));
+  box-shadow: 0 0 24px rgba(35, 220, 153, 0.15);
+}
+.shipment-result strong {
+  display: block;
+  font-size: 15px;
+  letter-spacing: 0.3px;
+}
+.shipment-result p,
+.shipment-result small {
+  display: block;
+  margin: 7px 0 0;
+  color: rgba(224, 238, 255, 0.78);
+}
+.missing-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.missing-list span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 96, 122, 0.26);
+  border-radius: 10px;
+  background: rgba(8, 18, 34, 0.45);
+}
+.missing-list b {
+  color: #ff8ea0;
+}
