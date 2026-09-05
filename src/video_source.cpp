@@ -444,22 +444,9 @@ bool VideoSource::ReadRgbd(RgbdFrame* frame) {
       if (frameset == nullptr || frameset->colorFrame() == nullptr || frameset->depthFrame() == nullptr) {
         return false;
       }
-      // 丢弃已经积压的旧帧，只处理队列中最新的一组 RGB-D 帧，避免算法
-      // 推理速度低于相机帧率时延迟持续累积。
-      // SDK 内部队列在处理线程落后时可能积累几十到上百帧；只清理几帧
-      // 仍会把数秒前的画面送入推流。持续快速取帧，直到队列基本为空。
-      for (int drain = 0; drain < 120; ++drain) {
-        try {
-          std::shared_ptr<ob::FrameSet> newer = impl_->pipeline->waitForFrames(1);
-          if (newer != nullptr && newer->colorFrame() != nullptr && newer->depthFrame() != nullptr) {
-            frameset = std::move(newer);
-          } else {
-            break;
-          }
-        } catch (...) {
-          break;
-        }
-      }
+      // 不再使用 waitForFrames(0/1) 排空 SDK 队列。Orbbec 当前固件会把
+      // 每次空队列轮询都写成 warning，在实时压力下会形成日志洪水；主
+      // waitForFrames(1000) 已经提供了稳定的同步帧，直接处理该帧即可。
 
       std::shared_ptr<ob::ColorFrame> color_frame = frameset->colorFrame();
       std::shared_ptr<ob::DepthFrame> depth_frame = frameset->depthFrame();

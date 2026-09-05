@@ -4,6 +4,7 @@
  */
 
 #include "visualizer.h"
+#include "visualization_flags.h"
 
 #include <algorithm>
 #include <array>
@@ -54,8 +55,13 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
   } else {
     image = cv::Mat(frame->height, frame->width, CV_8UC3, frame->bgr_data.data());
   }
+  const bool draw_object_boxes = VisualizationFlagEnabled("object_boxes", true);
+  const bool draw_hand_box = VisualizationFlagEnabled("hand_box", false);
+  const bool draw_skeleton = VisualizationFlagEnabled("skeleton", true);
+  const bool draw_keypoints = VisualizationFlagEnabled("keypoints", true);
+
   // 检测框旁显示类别和 3D 坐标，便于检查 RGB-D 对齐效果。
-  for (std::size_t i = 0; i < result.objects.size(); ++i) {
+  for (std::size_t i = 0; i < result.objects.size() && draw_object_boxes; ++i) {
     const ObjectDetection& object = result.objects[i];
     const cv::Scalar color = IndexedColor(static_cast<int>(i));
     cv::Rect rect(object.box.x, object.box.y, object.box.width, object.box.height);
@@ -74,7 +80,6 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
                   cv::FONT_HERSHEY_SIMPLEX, 0.52, color, 2);
     }
   }
-  const bool draw_hand_landmarks = HandLandmarksVisible();
   // 手部关键点用于观察 RKNN 手部关键点输出是否稳定。
   for (std::size_t hand_index = 0; hand_index < result.hands.size(); ++hand_index) {
     const HandPose& hand = result.hands[hand_index];
@@ -88,7 +93,7 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
         {5, 9}, {9, 13}, {13, 17},
     }};
     const cv::Scalar hand_color = hand_index == 0U ? cv::Scalar(255, 255, 255) : cv::Scalar(255, 255, 0);
-    if (draw_hand_landmarks && hand.box.width > 0 && hand.box.height > 0) {
+    if (draw_hand_box && hand.box.width > 0 && hand.box.height > 0) {
       cv::Rect hand_rect(hand.box.x, hand.box.y, hand.box.width, hand.box.height);
       cv::rectangle(image, hand_rect, hand_color, 2);
       std::string hand_label = "hand " + std::to_string(hand_index);
@@ -99,7 +104,7 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
       cv::putText(image, hand_label, cv::Point(hand.box.x, std::max(20, hand.box.y - 6)),
                   cv::FONT_HERSHEY_SIMPLEX, 0.5, hand_color, 1);
     }
-    if (!draw_hand_landmarks) {
+    if (!draw_skeleton && !draw_keypoints) {
       continue;
     }
     std::vector<cv::Point> points;
@@ -129,6 +134,7 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
       }
     }
     for (const std::pair<int, int>& connection : hand_connections) {
+      if (!draw_skeleton) break;
       if (connection.first < static_cast<int>(points.size()) && connection.second < static_cast<int>(points.size())) {
         const bool constrained_line = point_has_3d[static_cast<std::size_t>(connection.first)] &&
                                       point_has_3d[static_cast<std::size_t>(connection.second)];
@@ -136,7 +142,7 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
         cv::line(image, points[connection.first], points[connection.second], line_color, constrained_line ? 3 : 1);
       }
     }
-    for (std::size_t i = 0; i < points.size(); ++i) {
+    for (std::size_t i = 0; i < points.size() && draw_keypoints; ++i) {
       const int radius = i == 0U ? 3 : 2;
       cv::Scalar joint_color(255, 0, 0);
       if (i < hand.joints_3d.size() && point_has_3d[i]) {
@@ -147,7 +153,7 @@ void Visualizer::Draw(ImageFrame* frame, const PerceptionResult& result, const S
       cv::circle(image, points[i], radius + 1, cv::Scalar(255, 255, 255), 1);
     }
 
-    if (hand.palm_pixel_valid) {
+    if (hand.palm_pixel_valid && draw_keypoints) {
       // 黄色十字始终表示实际查询深度的手心像素。
       cv::Point palm_center(hand.palm_pixel.x, hand.palm_pixel.y);
       cv::drawMarker(image, palm_center, cv::Scalar(0, 0, 0), cv::MARKER_CROSS, 32, 7);

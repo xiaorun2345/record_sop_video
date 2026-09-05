@@ -35,7 +35,7 @@
     </header>
     <div class="content">
       <section class="left-panel">
-        <div class="tabs"><button id="tab-live" class="tab active">▣　实时预览</button><button id="tab-history" class="tab">▧　历史记录</button></div>
+        <div class="tabs"><button id="tab-live" class="tab active">▣　实时预览</button><button id="tab-history" class="tab">▧　历史录像 / 导出视频</button></div>
         <div class="selectors">
           <label>相机选择<select><option>Camera 01</option></select></label>
           <label>分辨率<select id="resolution-select"><option value="1920x1080">1920×1080</option><option value="640x480">640×480</option></select></label>
@@ -50,7 +50,7 @@
           </div>
           <div class="video-controls">
             <button id="play-toggle" class="control-icon">▶<small>启动算法</small></button><button id="screenshot-button" class="control-icon">▣<small>截图</small></button>
-            <label class="record-mode">录制内容<select id="record-mode-select"><option value="processed">算法处理视频</option><option value="raw">原始视频</option></select></label><button id="record-button" class="control-icon record">⦿<small>录制</small></button><button id="light-button" class="control-icon">☼<small>补光灯</small></button>
+            <button id="recordings-button" class="control-icon history-export">▧<small>历史录像<br>导出视频</small></button><label class="record-mode">录制内容<select id="record-mode-select"><option value="processed">算法处理视频</option><option value="raw">原始视频</option></select></label><button id="record-button" class="control-icon record">⦿<small>录制</small></button><button id="light-button" class="control-icon">☼<small>补光灯</small></button>
             <span class="zoom">−　 <b>100%</b>　 +</span><button class="control-icon fullscreen">⛶<small>全屏</small></button>
           </div>
         </section>
@@ -80,6 +80,6 @@
   </main>
   <div class="alarm" id="alarm"><span>⚠</span><div><b>报警中 · 连接器未检测到</b><small>声光报警剩余 <em id="alarm-count">5</em> 秒</small></div><button id="dismiss-alarm">立即关闭</button></div>
   <script src="app.js" defer></script>
-  <div id="recordings-dialog" class="recordings-dialog" hidden><div class="recordings-panel"><div class="card-heading"><h3>录像列表</h3><button id="recordings-close" class="dialog-close">×</button></div><p id="recordings-empty" class="hint">正在加载…</p><ul id="recordings-list"></ul></div></div>
+  <div id="recordings-dialog" class="recordings-dialog" hidden><div class="recordings-panel"><div class="card-heading"><div><h3>历史录像与导出</h3><p class="hint">查看已保存的视频，并导出到当前电脑</p></div><button id="recordings-close" class="dialog-close">×</button></div><p id="recordings-empty" class="hint">正在加载历史录像…</p><ul id="recordings-list"></ul></div></div>
 </body>
 </html>

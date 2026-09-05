@@ -1,12 +1,59 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from pathlib import Path
+from typing import Optional
 from . import backend
 
 router = APIRouter(prefix="/api", tags=["runtime"])
 class Start(BaseModel): resolution: str = "640x480"
 class Recording(BaseModel): mode: str = "processed"
+VISUALIZATION_DEFAULTS = {
+    "hand_landmarks": True,
+    "object_boxes": True,
+    "hand_box": False,
+    "skeleton": True,
+    "keypoints": True,
+    "debug_panel": True,
+}
+
+def _visual_marker(name: str) -> Path:
+    return Path(f"/tmp/rk3588_sop_visual_{name}")
+
+def _visualization_status() -> dict[str, bool]:
+    result = {}
+    for name, default in VISUALIZATION_DEFAULTS.items():
+        off = Path(str(_visual_marker(name)) + ".off")
+        result[name] = False if off.exists() else default
+    result["hand_landmarks"] = result["hand_box"] and result["skeleton"] and result["keypoints"]
+    return result
+
+class VisualizationSettings(BaseModel):
+    hand_landmarks: Optional[bool] = None
+    object_boxes: Optional[bool] = None
+    hand_box: Optional[bool] = None
+    skeleton: Optional[bool] = None
+    keypoints: Optional[bool] = None
+    debug_panel: Optional[bool] = None
+
+@router.get("/visualization/settings")
+def visualization_settings():
+    return _visualization_status()
+
+@router.put("/visualization/settings")
+def update_visualization_settings(value: VisualizationSettings):
+    payload = value.model_dump(exclude_none=True)
+    if "hand_landmarks" in payload:
+        payload.update({name: payload["hand_landmarks"] for name in ("hand_box", "skeleton", "keypoints")})
+    for name, enabled in payload.items():
+        if name not in VISUALIZATION_DEFAULTS: continue
+        marker = _visual_marker(name)
+        off = Path(str(marker) + ".off")
+        if enabled: off.unlink(missing_ok=True)
+        else: off.touch()
+    return _visualization_status()
 def _recording_file(filename: str) -> Path:
     safe = Path(filename).name
     if safe != filename or Path(safe).suffix.lower() not in (".mp4", ".avi", ".mkv"): raise HTTPException(400, "无效的视频文件名")
@@ -28,6 +75,7 @@ def delete_recording(filename: str):
     path=_recording_file(filename); path.unlink(); return {"ok":True,"filename":path.name,"message":"视频已删除"}
 @router.get("/algorithm/status")
 @router.get("/recording/status")
+@router.get("/camera/status")
 def status():
     with backend.lock: return backend.status_locked()
 @router.post("/camera/start")
@@ -50,6 +98,13 @@ def landmarks(value: dict):
     if not isinstance(enabled,bool): raise HTTPException(400,"enabled 必须是布尔值")
     if enabled: backend.HAND_LANDMARKS_VISIBILITY.touch()
     else: backend.HAND_LANDMARKS_VISIBILITY.unlink(missing_ok=True)
+    # Legacy master switch is a convenience shortcut: it updates all three
+    # hand overlays together, while the individual controls remain independent
+    # when changed through /visualization/settings.
+    for name in ("hand_box", "skeleton", "keypoints"):
+        off = Path(str(_visual_marker(name)) + ".off")
+        if enabled: off.unlink(missing_ok=True)
+        else: off.touch()
     return backend.status_locked()
 @router.post("/recording/start")
 def recording_start(value: Recording = Recording()):

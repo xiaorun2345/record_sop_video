@@ -12,6 +12,7 @@
 #include <ctime>
 #include <atomic>
 #include <condition_variable>
+#include <cstdio>
 #include <mutex>
 #include <iomanip>
 #include <iostream>
@@ -27,6 +28,8 @@
 #include "object_tracker.h"
 #include "serial_light_controller.h"
 #include "sop_state_machine.h"
+#include "sop_runtime_snapshot.h"
+#include "visualization_flags.h"
 #include "time_utils.h"
 #include "video_source.h"
 #include "visualizer.h"
@@ -412,6 +415,8 @@ bool ProcessFrame(RgbdFrame* rgbd_frame, const VideoSource& source, Yolov8Detect
   PerceptionResult result;
   result.frame_id = rgbd_frame->color.frame_id;
   result.timestamp_sec = rgbd_frame->color.timestamp_sec;
+  result.image_width = rgbd_frame->color.width;
+  result.image_height = rgbd_frame->color.height;
   result.depth_aligned_to_color = rgbd_frame->depth_aligned_to_color;
 
   std::vector<ObjectDetection> objects;
@@ -467,6 +472,13 @@ bool ProcessFrame(RgbdFrame* rgbd_frame, const VideoSource& source, Yolov8Detect
 
   const auto state_begin = std::chrono::steady_clock::now();
   state_machine->Update(result);
+  // 工作台以 500ms 轮询，运行快照无需按每帧落盘；10Hz 足够实时，也能
+  // 避免在高帧率下对 eMMC/SD 卡产生持续的小文件写入。
+  static double last_snapshot_timestamp = -1.0;
+  if (last_snapshot_timestamp < 0.0 || result.timestamp_sec - last_snapshot_timestamp >= 0.1) {
+    WriteSopRuntimeSnapshot("/tmp/rk3588_sop_runtime_state.json", state_machine->report(), result);
+    last_snapshot_timestamp = result.timestamp_sec;
+  }
   if (metrics != nullptr) {
     metrics->state_ms = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - state_begin)
@@ -476,7 +488,8 @@ bool ProcessFrame(RgbdFrame* rgbd_frame, const VideoSource& source, Yolov8Detect
   const auto draw_begin = std::chrono::steady_clock::now();
   visualizer.Draw(&rgbd_frame->color, result, *state_machine);
 #if RK3588_SOP_HAS_OPENCV
-  if (metrics != nullptr && !rgbd_frame->color.bgr_data.empty()) {
+  if (metrics != nullptr && !rgbd_frame->color.bgr_data.empty() &&
+      VisualizationFlagEnabled("debug_panel", true)) {
     cv::Mat image = MakeDisplayImage(rgbd_frame->color);
     DrawStatusPanel(&image, result, *state_machine, *metrics);
   }
@@ -494,9 +507,14 @@ bool ProcessFrame(RgbdFrame* rgbd_frame, const VideoSource& source, Yolov8Detect
   if (serial_light != nullptr) {
     serial_light->SetAlert(two_hands_alert);
   }
-  if (two_hands_alert) {
+  static bool previous_two_hands_alert = false;
+  static auto last_two_hands_log = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+  const auto now_for_alert = std::chrono::steady_clock::now();
+  if (two_hands_alert && (!previous_two_hands_alert || now_for_alert - last_two_hands_log >= std::chrono::seconds(5))) {
     std::cout << "[warning] two_hands: 检测到 2 个手部目标，触发串口报警灯" << std::endl;
+    last_two_hands_log = now_for_alert;
   }
+  previous_two_hands_alert = two_hands_alert;
   return true;
 }
 
@@ -528,7 +546,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  SopStateMachine state_machine(config.steps);
+  SopStateMachine state_machine(config.steps, config.rois, config.execution_mode);
   ObjectTracker object_tracker;
   HandSkeletonConstraint hand_skeleton_constraint(config.hand_skeleton);
   state_machine.Reset(NowInSeconds());
@@ -550,6 +568,11 @@ int main(int argc, char** argv) {
     }
   }
   bool state_initialized_from_frame = false;
+  std::error_code runtime_state_error;
+  std::filesystem::remove("/tmp/rk3588_sop_runtime_state.json", runtime_state_error);
+  const std::filesystem::path sop_reset_file = "/tmp/rk3588_sop_reset";
+  std::error_code config_time_error;
+  auto config_write_stamp = std::filesystem::last_write_time(config_path, config_time_error);
   // Without the web/GStreamer control plane this is the normal CLI mode:
   // process frames immediately.  The web build switches it off until the
   // backend creates the mode file.
@@ -609,6 +632,7 @@ int main(int argc, char** argv) {
   // 相机服务生命周期独立于 SOP 状态机：即使一次 SOP 已完成，相机和原始流也继续运行，
   // 直到后端停止相机进程。这样关闭/重新开启算法不会重新占用 USB 相机。
   int consecutive_read_failures = 0;
+  int consecutive_process_failures = 0;
   std::uint64_t fps_frames = 0;
   auto fps_window_begin = std::chrono::steady_clock::now();
   std::mutex latest_mutex;
@@ -669,6 +693,32 @@ int main(int argc, char** argv) {
       break;
     }
     consecutive_read_failures = 0;
+    {
+      std::error_code reset_error;
+      if (std::filesystem::exists(sop_reset_file, reset_error)) {
+        state_machine.Reset(frame.color.timestamp_sec);
+        state_initialized_from_frame = true;
+        std::filesystem::remove(sop_reset_file, reset_error);
+        std::filesystem::remove("/tmp/rk3588_sop_runtime_state.json", reset_error);
+      }
+    }
+    {
+      std::error_code changed_error;
+      const auto current_stamp = std::filesystem::last_write_time(config_path, changed_error);
+      if (!changed_error && !config_time_error && current_stamp != config_write_stamp) {
+        SopAppConfig refreshed_config;
+        ConfigLoader refreshed_loader;
+        if (refreshed_loader.Load(config_path, &refreshed_config)) {
+          state_machine = SopStateMachine(refreshed_config.steps, refreshed_config.rois, refreshed_config.execution_mode);
+          state_machine.Reset(frame.color.timestamp_sec);
+          state_initialized_from_frame = true;
+          config_write_stamp = current_stamp;
+          std::error_code snapshot_error;
+          std::filesystem::remove("/tmp/rk3588_sop_runtime_state.json", snapshot_error);
+          std::cout << "SOP 配置已热加载: " << refreshed_config.execution_mode << std::endl;
+        }
+      }
+    }
 #if RK3588_SOP_HAS_OPENCV
     const std::vector<std::uint8_t> raw_bgr = frame.color.bgr_data;
 #endif
@@ -717,16 +767,34 @@ int main(int argc, char** argv) {
     if (source.last_capture_read_ms() > 0.0) {
       metrics.read_ms = source.last_capture_read_ms() + source.last_color_convert_ms() + source.last_frame_copy_ms();
     }
-    if (algorithm_enabled && !state_machine.state().finished) {
+    if (algorithm_enabled) {
       if (!ProcessFrame(&frame, source, &detector, &hand_detector, &hand_skeleton_constraint,
                         &object_tracker, &state_machine, serial_light_ptr, visualizer, &metrics)) {
-        break;
+        ++consecutive_process_failures;
+        if (consecutive_process_failures == 1 || consecutive_process_failures % 10 == 0) {
+          std::cerr << "当前帧算法处理失败（连续 " << consecutive_process_failures << " 次）" << std::endl;
+        }
+        if (consecutive_process_failures >= 30) {
+          std::cerr << "连续算法处理失败超过阈值，相机服务退出" << std::endl;
+          break;
+        }
+        continue;
       }
+      consecutive_process_failures = 0;
       // Expose the current aggregate NPU inference latency to the web console.
-      std::ofstream npu_latency_file("/tmp/rk3588_sop_npu_latency_ms", std::ios::trunc);
-      if (npu_latency_file) {
-        npu_latency_file << std::fixed << std::setprecision(3)
-                         << (metrics.yolo_npu_ms + metrics.hand_det_npu_ms + metrics.hand_lm_npu_ms) << "\n";
+      static auto last_npu_write = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+      const auto npu_now = std::chrono::steady_clock::now();
+      if (npu_now - last_npu_write >= std::chrono::milliseconds(250)) {
+        const std::string npu_value = std::to_string(metrics.yolo_npu_ms + metrics.hand_det_npu_ms + metrics.hand_lm_npu_ms) + "\n";
+        const std::string npu_tmp = "/tmp/rk3588_sop_npu_latency_ms.tmp";
+        std::ofstream npu_latency_file(npu_tmp, std::ios::trunc);
+        if (npu_latency_file) {
+          npu_latency_file << std::fixed << std::setprecision(3)
+                           << (metrics.yolo_npu_ms + metrics.hand_det_npu_ms + metrics.hand_lm_npu_ms) << "\n";
+          npu_latency_file.close();
+          std::rename(npu_tmp.c_str(), "/tmp/rk3588_sop_npu_latency_ms");
+          last_npu_write = npu_now;
+        }
       }
     }
 #if RK3588_SOP_HAS_GSTREAMER

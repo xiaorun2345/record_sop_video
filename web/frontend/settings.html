@@ -1,1 +1,181 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>系统设置 · DenseAI</title><link rel="stylesheet" href="device.css"></head><body><main><header><a href="index.html">← 返回工作台</a><h1>系统设置</h1></header><nav class="subnav"><a href="device.html">设备管理</a><a class="active" href="settings.html">系统设置</a></nav><section class="grid"><article><h2>时间与区域</h2><label>时区<select id="timezone"><option>UTC</option><option>Asia/Shanghai</option></select></label><label>NTP 开关<input id="ntp" type="checkbox"></label><label>NTP 服务器<input id="ntp-server"></label><button id="save-time">保存时间设置</button></article><article><h2>存储策略</h2><label>自动清理天数<input id="cleanup-days" type="number" min="1"></label><label>保留视频<input id="video-retention" type="checkbox"></label><label>低空间阈值 %<input id="low-space" type="number" min="1" max="90"></label><button id="save-storage">保存存储策略</button></article><article><h2>服务配置</h2><label>API 端口<input id="api-port" type="number" min="1024" max="65535"></label><label>Node-RED 端口<input id="node-red-port" type="number" min="1024" max="65535"></label><button id="save-services">保存服务配置</button><p class="hint">修改端口需要管理员权限并可能导致服务短暂中断。</p></article><article><h2>日志设置</h2><label>日志级别<select id="log-level"><option>INFO</option><option>WARNING</option><option>ERROR</option></select></label><label>保存天数<input id="log-days" type="number" min="1" value="30"></label><p class="hint">日志清理和配置备份请在设备管理页面执行。</p></article></section><p id="result" class="hint"></p></main><script>const api=(new URLSearchParams(location.search).get('api')||`${location.protocol}//${location.hostname}:8080`).replace(/\/$/,'');const $=s=>document.querySelector(s);async function req(path,opt){const r=await fetch(api+path,opt),p=await r.json().catch(()=>({}));if(!r.ok)throw Error(p.error||`HTTP ${r.status}`);return p}function result(t){$('#result').textContent=t}async function load(){const[t,p,s]=await Promise.all(['/api/time','/api/storage-policy','/api/services/config'].map(x=>req(x)));$('#timezone').value=t.timezone;$('#ntp').checked=t.ntp_enabled;$('#ntp-server').value=t.ntp_server;$('#cleanup-days').value=p.auto_cleanup_days;$('#video-retention').checked=p.video_retention_enabled;$('#low-space').value=p.low_space_threshold_percent;$('#api-port').value=s.api_port;$('#node-red-port').value=s.node_red_port}async function save(path,data){try{await req(path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});result('设置已保存')}catch(e){result(e.message)}}$('#save-time').onclick=()=>save('/api/time',{timezone:$('#timezone').value,ntp_enabled:$('#ntp').checked,ntp_server:$('#ntp-server').value});$('#save-storage').onclick=()=>save('/api/storage-policy',{auto_cleanup_days:Number($('#cleanup-days').value),video_retention_enabled:$('#video-retention').checked,low_space_threshold_percent:Number($('#low-space').value)});$('#save-services').onclick=()=>save('/api/services/config',{api_port:Number($('#api-port').value),node_red_port:Number($('#node-red-port').value)});load();</script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>系统设置 · DenseAI</title>
+  <link rel="stylesheet" href="device.css">
+</head>
+<body>
+<main>
+  <header>
+    <a href="index.html">← 返回工作台</a>
+    <h1>系统设置</h1>
+  </header>
+  <nav class="subnav">
+    <a href="device.html">设备管理</a>
+    <a class="active" href="settings.html">系统设置</a>
+  </nav>
+
+  <section id="status" class="status-banner" aria-live="polite">
+    <div>
+      <strong id="status-title">正在读取系统设置</strong>
+      <p id="status-detail">请稍候，页面正在同步设备配置。</p>
+    </div>
+    <span id="status-meta"></span>
+  </section>
+
+  <section class="grid">
+    <article>
+      <h2>时间与区域</h2>
+      <label>时区<select id="timezone"><option>UTC</option><option>Asia/Shanghai</option></select></label>
+      <label>NTP 开关<input id="ntp" type="checkbox"></label>
+      <label>NTP 服务器<input id="ntp-server"></label>
+      <button id="save-time">保存时间设置</button>
+      <p id="time-state" class="section-hint" role="status" aria-live="polite">等待操作</p>
+    </article>
+    <article>
+      <h2>存储策略</h2>
+      <label>自动清理天数<input id="cleanup-days" type="number" min="1"></label>
+      <label>保留视频<input id="video-retention" type="checkbox"></label>
+      <label>低空间阈值 %<input id="low-space" type="number" min="1" max="90"></label>
+      <button id="save-storage">保存存储策略</button>
+      <p id="storage-state" class="section-hint" role="status" aria-live="polite">等待操作</p>
+    </article>
+    <article>
+      <h2>服务配置</h2>
+      <label>API 端口<input id="api-port" type="number" min="1024" max="65535"></label>
+      <label>Node-RED 端口<input id="node-red-port" type="number" min="1024" max="65535"></label>
+      <button id="save-services">保存服务配置</button>
+      <p class="hint">修改端口需要管理员权限并可能导致服务短暂中断。</p>
+      <p id="services-state" class="section-hint" role="status" aria-live="polite">等待操作</p>
+    </article>
+    <article>
+      <h2>日志设置</h2>
+      <label>日志级别<select id="log-level"><option>INFO</option><option>WARNING</option><option>ERROR</option></select></label>
+      <label>保存天数<input id="log-days" type="number" min="1" value="30"></label>
+      <p class="hint">日志清理和配置备份请在设备管理页面执行。</p>
+    </article>
+    <article class="wide">
+      <h2>最近操作</h2>
+      <div id="action-log" class="action-log"></div>
+    </article>
+  </section>
+</main>
+
+<script>
+const api = (new URLSearchParams(location.search).get('api') || `${location.protocol}//${location.hostname}:8080`).replace(/\/$/, '');
+const $ = s => document.querySelector(s);
+const status = {
+  title: $('#status-title'),
+  detail: $('#status-detail'),
+  meta: $('#status-meta'),
+};
+const sectionState = {
+  time: $('#time-state'),
+  storage: $('#storage-state'),
+  services: $('#services-state'),
+};
+const actionLog = $('#action-log');
+const buttons = {
+  time: $('#save-time'),
+  storage: $('#save-storage'),
+  services: $('#save-services'),
+};
+let statusTimer = 0;
+
+async function req(path, opt) {
+  const r = await fetch(api + path, opt);
+  const p = await r.json().catch(() => ({}));
+  if (!r.ok) throw Error(p.error || `HTTP ${r.status}`);
+  return p;
+}
+
+function stamp() {
+  return new Date().toLocaleString('zh-CN', { hour12: false });
+}
+
+function setStatus(type, title, detail, meta = '') {
+  clearTimeout(statusTimer);
+  $('#status').dataset.type = type;
+  status.title.textContent = title;
+  status.detail.textContent = detail;
+  status.meta.textContent = meta;
+  if (type !== 'error') {
+    statusTimer = setTimeout(() => {
+      setStatus('info', '系统设置', '可继续修改后点击保存。');
+    }, 5000);
+  }
+}
+
+function setBusy(button, busy, normalText) {
+  button.disabled = busy;
+  button.textContent = busy ? '保存中…' : normalText;
+}
+
+function pushLog(type, title, detail, meta = '') {
+  const line = document.createElement('div');
+  line.className = `log-line is-${type}`;
+  line.innerHTML = `<strong>${title}</strong><span>${detail}</span><small>${meta || stamp()}</small>`;
+  actionLog.prepend(line);
+  while (actionLog.children.length > 6) actionLog.removeChild(actionLog.lastElementChild);
+}
+
+async function load() {
+  setStatus('info', '正在读取系统设置', '请稍候，页面正在同步设备配置。');
+  try {
+    const [t, p, s] = await Promise.all(['/api/time', '/api/storage-policy', '/api/services/config'].map(x => req(x)));
+    $('#timezone').value = t.timezone;
+    $('#ntp').checked = t.ntp_enabled;
+    $('#ntp-server').value = t.ntp_server;
+    $('#cleanup-days').value = p.auto_cleanup_days;
+    $('#video-retention').checked = p.video_retention_enabled;
+    $('#low-space').value = p.low_space_threshold_percent;
+    $('#api-port').value = s.api_port;
+    $('#node-red-port').value = s.node_red_port;
+    setStatus('success', '系统设置已加载', '当前配置已显示在页面中。', `刷新于 ${stamp()}`);
+  } catch (e) {
+    setStatus('error', '加载失败', e.message || '无法读取系统设置');
+    pushLog('error', '系统设置加载失败', e.message || '无法读取系统设置');
+  }
+}
+
+async function save(key, path, data, label, button, normalText) {
+  setBusy(button, true, normalText);
+  sectionState[key].textContent = `${label}保存中…`;
+  pushLog('info', `${label}保存中`, '正在写入设备配置。');
+  try {
+    await req(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const now = stamp();
+    sectionState[key].textContent = `已保存于 ${now}`;
+    pushLog('success', `${label}已保存`, '配置已写入设备。', `完成于 ${now}`);
+  } catch (e) {
+    const msg = e.message || '保存失败';
+    sectionState[key].textContent = `保存失败：${msg}`;
+    pushLog('error', `${label}保存失败`, msg);
+  } finally {
+    setBusy(button, false, normalText);
+  }
+}
+
+buttons.time.onclick = () => save('time', '/api/time', {
+  timezone: $('#timezone').value,
+  ntp_enabled: $('#ntp').checked,
+  ntp_server: $('#ntp-server').value,
+}, '时间设置', buttons.time, '保存时间设置');
+
+buttons.storage.onclick = () => save('storage', '/api/storage-policy', {
+  auto_cleanup_days: Number($('#cleanup-days').value),
+  video_retention_enabled: $('#video-retention').checked,
+  low_space_threshold_percent: Number($('#low-space').value),
+}, '存储策略', buttons.storage, '保存存储策略');
+
+buttons.services.onclick = () => save('services', '/api/services/config', {
+  api_port: Number($('#api-port').value),
+  node_red_port: Number($('#node-red-port').value),
+}, '服务配置', buttons.services, '保存服务配置');
+
+load();
+</script>
+</body>
+</html>

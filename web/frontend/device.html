@@ -1,1 +1,103 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>设备管理 · DenseAI</title><link rel="stylesheet" href="device.css"></head><body><main><header><a href="index.html">← 返回工作台</a><h1>设备管理</h1><span id="device-status" class="online">● 获取状态中</span></header><nav class="subnav"><a class="active" href="device.html">设备管理</a><a href="settings.html">系统设置</a></nav><section class="grid"><article class="wide"><h2>设备身份</h2><div class="form-grid"><label>设备名称<input id="device-name"></label><label>设备编号<input id="device-id"></label><label>工位编号<input id="station-id"></label><label>主机名<input id="device-host" disabled></label></div><button id="save-identity">保存身份</button></article><article class="wide"><h2>网络配置</h2><div class="tabs"><button class="tab active" data-tab="ethernet">有线网络</button><button class="tab" data-tab="wifi">Wi‑Fi</button></div><div class="form-grid"><label>地址模式<select id="net-mode"><option value="dhcp">DHCP 自动获取</option><option value="static">静态 IP</option></select></label><label>网卡<input id="net-interface"></label><label>静态 IP<input id="static-ip" placeholder="192.168.1.100"></label><label>子网掩码<input id="netmask" placeholder="255.255.255.0"></label><label>网关<input id="gateway"></label><label>DNS<input id="dns"></label><label class="wifi-only">Wi‑Fi SSID<input id="wifi-ssid"></label><label class="wifi-only">Wi‑Fi 密码<input id="wifi-password" type="password"></label></div><p class="hint">当前 IP：<strong id="net-ip">--</strong>　MAC：<strong id="net-mac">--</strong>　链路：<strong id="link-speed">--</strong></p><button id="save-network">保存并应用网络</button><button id="network-test">网络连通性测试</button></article><article><h2>设备健康</h2><p>CPU 温度：<strong id="cpu-temp">--</strong> °C</p><p>磁盘：<strong id="storage-used">--</strong> / <strong id="storage-total">--</strong> GB</p><p>服务：<strong id="service-status">--</strong></p></article><article><h2>声光报警器</h2><p>状态：<strong id="alarm-status">--</strong></p><p>设备路径：<code>/dev/ch341-light</code></p><p>波特率：<strong>9600（固定）</strong></p><button id="alarm-test">测试报警器</button></article><article class="wide"><h2>维护操作</h2><button id="backup">导出配置备份</button><button id="restore">恢复最近备份</button><button id="clear-logs">清理缓存和日志</button><button id="factory-reset" class="danger">恢复出厂设置</button><p id="maintenance-result" class="hint"></p></article></section></main><script src="device.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>设备管理 · DenseAI</title>
+  <link rel="stylesheet" href="device.css">
+</head>
+<body>
+<main>
+  <header>
+    <a href="index.html">← 返回工作台</a>
+    <h1>设备管理</h1>
+    <span id="device-status" class="online">● 获取状态中</span>
+  </header>
+
+  <nav class="subnav">
+    <a class="active" href="device.html">设备管理</a>
+    <a href="settings.html">系统设置</a>
+  </nav>
+
+  <section id="banner" class="status-banner" data-type="info" aria-live="polite">
+    <div>
+      <strong id="banner-title">正在读取设备信息</strong>
+      <p id="banner-detail">请稍候，页面正在同步设备配置。</p>
+    </div>
+    <span id="banner-meta"></span>
+  </section>
+
+  <section class="grid">
+    <article class="wide">
+      <h2>设备身份</h2>
+      <div class="form-grid">
+        <label>设备名称<input id="device-name"></label>
+        <label>设备编号<input id="device-id"></label>
+        <label>工位编号<input id="station-id"></label>
+        <label>主机名<input id="device-host" disabled></label>
+      </div>
+      <div class="button-row"><button id="save-identity">保存身份</button></div>
+      <p id="identity-state" class="section-hint">尚未保存</p>
+    </article>
+
+    <article class="wide">
+      <h2>网络配置</h2>
+      <div class="tabs">
+        <button class="tab active" data-tab="ethernet">有线网络</button>
+        <button class="tab" data-tab="wifi">Wi‑Fi</button>
+      </div>
+      <div class="form-grid">
+        <label>地址模式<select id="net-mode"><option value="dhcp">DHCP 自动获取</option><option value="static">静态 IP</option></select></label>
+        <label>网卡<input id="net-interface"></label>
+        <label>静态 IP<input id="static-ip" placeholder="192.168.1.100"></label>
+        <label>子网掩码<input id="netmask" placeholder="255.255.255.0"></label>
+        <label>网关<input id="gateway"></label>
+        <label>DNS<input id="dns"></label>
+        <label class="wifi-only">Wi‑Fi SSID<input id="wifi-ssid"></label>
+        <label class="wifi-only">Wi‑Fi 密码<input id="wifi-password" type="password"></label>
+      </div>
+      <p class="hint">当前 IP：<strong id="net-ip">--</strong>　MAC：<strong id="net-mac">--</strong>　链路：<strong id="link-speed">--</strong></p>
+      <div class="button-row">
+        <button id="save-network">保存并应用网络</button>
+        <button id="network-test" class="ghost">网络连通性测试</button>
+      </div>
+      <p id="network-state" class="section-hint">尚未执行网络测试</p>
+    </article>
+
+    <article>
+      <h2>设备健康</h2>
+      <p>CPU 温度：<strong id="cpu-temp">--</strong> °C</p>
+      <p>磁盘：<strong id="storage-used">--</strong> / <strong id="storage-total">--</strong> GB</p>
+      <p>服务：<strong id="service-status">--</strong></p>
+      <p id="health-state" class="section-hint">尚未刷新</p>
+    </article>
+
+    <article>
+      <h2>声光报警器</h2>
+      <p>状态：<strong id="alarm-status">--</strong></p>
+      <p>设备路径：<code>/dev/ch341-light</code></p>
+      <p>波特率：<strong>9600（固定）</strong></p>
+      <button id="alarm-test">测试报警器</button>
+      <p id="alarm-state" class="section-hint">尚未测试</p>
+    </article>
+
+    <article class="wide">
+      <h2>维护操作</h2>
+      <div class="button-row">
+        <button id="backup">导出配置备份</button>
+        <button id="restore">恢复最近备份</button>
+        <button id="clear-logs">清理缓存和日志</button>
+        <button id="factory-reset" class="danger">恢复出厂设置</button>
+      </div>
+      <p id="maintenance-result" class="hint">涉及系统数据的操作会进行二次确认。</p>
+    </article>
+
+    <article class="wide">
+      <h2>最近操作</h2>
+      <div id="action-log" class="action-log"></div>
+    </article>
+  </section>
+</main>
+<script src="device.js"></script>
+</body>
+</html>

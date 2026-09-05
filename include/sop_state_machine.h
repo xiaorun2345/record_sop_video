@@ -28,7 +28,9 @@ class SopStateMachine {
    * @brief 构造 SOP 状态机。
    * @param steps SOP 步骤配置。
    */
-  explicit SopStateMachine(const std::vector<SopStepConfig>& steps);
+  explicit SopStateMachine(const std::vector<SopStepConfig>& steps,
+                           const std::vector<RoiRegion>& rois = {},
+                           const std::string& execution_mode = "ordered");
 
   /**
    * @brief 重置 SOP 状态。
@@ -61,13 +63,26 @@ class SopStateMachine {
    */
   const SopRuntimeState& state() const;
 
+  /** @brief 获取最近一帧的可解释判定报告。 */
+  const SopRuntimeReport& report() const;
+
  private:
   /**
    * @brief 判断当前步骤是否满足。
    *
    * 这里按“必须同时满足的条件”逐条判断，比把所有逻辑堆成一行更容易排查。
    */
-  bool IsCurrentStepSatisfied(const SopStepConfig& step, const PerceptionResult& result) const;
+  bool IsCurrentStepSatisfied(const SopStepConfig& step, const PerceptionResult& result,
+                              SopStepRuntimeReport* report) const;
+
+  SopStepRuntimeReport EvaluateStep(int index, const PerceptionResult& result) const;
+  bool EvaluateObject(const RequiredObjectConfig& required_object, const PerceptionResult& result,
+                      SopObjectCheckResult* check) const;
+  bool EvaluateRelation(const RequiredObjectConfig& required_object, const PerceptionResult& result) const;
+  bool EvaluateHandRoi(const SopStepConfig& step, const PerceptionResult& result) const;
+  void RefreshReport(const PerceptionResult& result);
+  void EnsureStateShape(double timestamp_sec);
+  void AdvanceOrderedDisabledSteps();
 
   /**
    * @brief 生成超时预警。
@@ -85,7 +100,10 @@ class SopStateMachine {
   void UpdateRequiredObjectHistory(const SopStepConfig& step, const PerceptionResult& result);
 
   std::vector<SopStepConfig> steps_;
+  std::vector<RoiRegion> rois_;
+  std::string execution_mode_ = "ordered";
   SopRuntimeState state_;
+  mutable SopRuntimeReport report_;
 };
 
 #endif  // TOOLCHAINS_RK3588_EXAMPLES_RK3588_SOP_INCLUDE_SOP_STATE_MACHINE_H_

@@ -23,18 +23,65 @@ RECORDING_CONTROL = Path("/tmp/rk3588_sop_recording")
 HAND_LANDMARKS_VISIBILITY = Path("/tmp/rk3588_sop_hand_landmarks_visible")
 RECORDING_DIR = ROOT / "output" / "recordings"
 NPU_LATENCY_FILE = Path("/tmp/rk3588_sop_npu_latency_ms")
+RUNTIME_STATE_FILE = Path("/tmp/rk3588_sop_runtime_state.json")
+SOP_RESET_FILE = Path("/tmp/rk3588_sop_reset")
+VISUALIZATION_DEFAULTS = {"hand_landmarks": True, "object_boxes": True, "hand_box": False, "skeleton": True, "keypoints": True, "debug_panel": True}
 lock = threading.RLock(); mediamtx_proc = None; algorithm_proc = None
+_media_paths_cache = {"sop": False, "raw": False}
+_media_paths_cache_at = 0.0
+_recordings_cache = []
+_recordings_cache_at = 0.0
 # A fresh web session always starts with algorithm processing disabled.  The
 # marker is runtime state, not persistent configuration; stale markers made a
 # newly opened page appear to have started the algorithm by itself.
 MODE_FILE.unlink(missing_ok=True)
 RECORDING_CONTROL.unlink(missing_ok=True)
+RUNTIME_STATE_FILE.unlink(missing_ok=True)
+SOP_RESET_FILE.unlink(missing_ok=True)
 HAND_LANDMARKS_VISIBILITY.touch()
 
+class _ExistingProcess:
+    """Small Popen-compatible handle for a process adopted after a backend restart."""
+    def __init__(self, pid): self.pid = pid
+    def poll(self):
+        try:
+            os.kill(self.pid, 0)
+            return None
+        except OSError:
+            return 0
+    def wait(self, timeout=None):
+        deadline = time.time() + (timeout or 5)
+        while self.poll() is None and time.time() < deadline: time.sleep(0.05)
+        return self.poll() or 0
+
 def alive(proc): return proc is not None and proc.poll() is None
+
+def _find_process(executable):
+    """Find an already running process for this exact executable path."""
+    expected = executable.resolve()
+    for entry in Path("/proc").glob("[0-9]*"):
+        try:
+            if (entry / "exe").resolve() == expected:
+                return _ExistingProcess(int(entry.name))
+        except (OSError, ValueError):
+            continue
+    return None
+
+def _adopt_existing_locked():
+    global mediamtx_proc, algorithm_proc
+    if not alive(mediamtx_proc):
+        mediamtx_proc = _find_process(MEDIAMTX)
+    if not alive(algorithm_proc):
+        algorithm_proc = _find_process(ALGORITHM)
 def read_number(path):
     try: return float(path.read_text(encoding="utf-8").strip())
     except (OSError, ValueError): return 0.0
+
+def visualization_status():
+    result = {name: default and not Path(f"/tmp/rk3588_sop_visual_{name}.off").exists()
+              for name, default in VISUALIZATION_DEFAULTS.items()}
+    result["hand_landmarks"] = result["hand_box"] and result["skeleton"] and result["keypoints"]
+    return result
 def cpu_temperature_c():
     candidates = []
     for zone in sorted(Path("/sys/class/thermal").glob("thermal_zone*")):
@@ -62,6 +109,7 @@ def port_open(port):
     except OSError: return False
 def start_locked():
     global mediamtx_proc, algorithm_proc
+    _adopt_existing_locked()
     if not MEDIAMTX.exists() or not ALGORITHM.exists(): raise RuntimeError("运行文件不存在，请先完成构建/部署")
     if not alive(mediamtx_proc) and not port_open(1935):
         log = open(LOG_DIR / "mediamtx.log", "ab"); mediamtx_proc = subprocess.Popen([str(MEDIAMTX), str(MEDIAMTX_CFG)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -97,6 +145,8 @@ def start_locked():
 def camera_start_locked():
     start_locked()
     MODE_FILE.unlink(missing_ok=True)
+    if not _wait_for_stream("raw", 8.0):
+        raise RuntimeError("摄像头进程已启动，但原始视频流未就绪，请检查 runtime_logs/algorithm.log")
 
 def camera_stop_locked():
     MODE_FILE.unlink(missing_ok=True)
@@ -106,7 +156,11 @@ def camera_stop_locked():
 def algorithm_start_locked():
     if not alive(algorithm_proc):
         start_locked()
+    SOP_RESET_FILE.touch()
     MODE_FILE.touch()
+    if not _wait_for_stream("sop", 8.0):
+        MODE_FILE.unlink(missing_ok=True)
+        raise RuntimeError("算法进程已启动，但算法视频流未就绪，请检查 runtime_logs/algorithm.log")
 
 def algorithm_stop_locked():
     MODE_FILE.unlink(missing_ok=True)
@@ -120,7 +174,9 @@ def set_resolution(value):
     text = CONFIG.read_text(encoding="utf-8")
     text = re.sub(r"(?m)^input\.width=.*$", f"input.width={width}", text)
     text = re.sub(r"(?m)^input\.height=.*$", f"input.height={height}", text)
-    CONFIG.write_text(text, encoding="utf-8")
+    temporary = CONFIG.with_suffix(CONFIG.suffix + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.replace(temporary, CONFIG)
 def stop_proc(proc):
     if alive(proc):
         try: os.killpg(proc.pid, signal.SIGTERM); proc.wait(timeout=5)
@@ -128,26 +184,64 @@ def stop_proc(proc):
             if alive(proc): os.killpg(proc.pid, signal.SIGKILL)
 def stop_locked():
     global mediamtx_proc, algorithm_proc
+    _adopt_existing_locked()
     stop_proc(algorithm_proc); stop_proc(mediamtx_proc); algorithm_proc = None; mediamtx_proc = None
 def status_locked():
+    global _media_paths_cache, _media_paths_cache_at, _recordings_cache, _recordings_cache_at
+    _adopt_existing_locked()
     host = os.environ.get("SOP_PUBLIC_HOST", "127.0.0.1")
     stream_ready = False
     raw_ready = False
-    try:
-        with urllib.request.urlopen("http://127.0.0.1:9997/v3/paths/list", timeout=0.3) as response:
-            payload = json.load(response)
-            stream_ready = any(item.get("name") == "sop" and item.get("ready") for item in payload.get("items", []))
-            raw_ready = any(item.get("name") == "raw" and item.get("ready") for item in payload.get("items", []))
-    except (OSError, ValueError):
-        pass
+    now = time.monotonic()
+    if now - _media_paths_cache_at >= 0.25:
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:9997/v3/paths/list", timeout=0.3) as response:
+                payload = json.load(response)
+                _media_paths_cache = {
+                    "sop": any(item.get("name") == "sop" and item.get("ready") for item in payload.get("items", [])),
+                    "raw": any(item.get("name") == "raw" and item.get("ready") for item in payload.get("items", [])),
+                }
+        except (OSError, ValueError):
+            _media_paths_cache = {"sop": False, "raw": False}
+        _media_paths_cache_at = now
+    stream_ready = _media_paths_cache["sop"]
+    raw_ready = _media_paths_cache["raw"]
     camera_running = alive(algorithm_proc)
     algorithm_running = camera_running and MODE_FILE.exists()
     mode = ""
     try: mode = RECORDING_CONTROL.read_text(encoding="utf-8").strip()
     except OSError: pass
     fps = read_number(Path("/tmp/rk3588_sop_fps"))
-    files = sorted((str(p.relative_to(ROOT)) for p in list(RECORDING_DIR.glob("*.mp4")) + list(RECORDING_DIR.glob("*.avi"))), reverse=True) if RECORDING_DIR.exists() else []
-    return {"camera": "running" if camera_running else "stopped", "algorithm": "running" if algorithm_running else "stopped", "mediamtx": "running" if alive(mediamtx_proc) or port_open(1935) else "stopped", "raw_stream": f"http://{host}:8889/raw/", "stream": f"http://{host}:8889/sop/", "raw_stream_ready": raw_ready, "stream_ready": stream_ready, "algorithm_pid": algorithm_proc.pid if camera_running else None, "fps": fps, "npu_latency_ms": read_number(NPU_LATENCY_FILE), "cpu_temperature_c": cpu_temperature_c(), "recording": mode or "stopped", "recording_dir": str(RECORDING_DIR), "recordings": files[:20], "latest_recording": files[0] if files else None, "hand_landmarks_visible": HAND_LANDMARKS_VISIBILITY.exists()}
+    if now - _recordings_cache_at >= 1.0:
+        _recordings_cache = sorted((str(p.relative_to(ROOT)) for p in list(RECORDING_DIR.glob("*.mp4")) + list(RECORDING_DIR.glob("*.avi"))), reverse=True) if RECORDING_DIR.exists() else []
+        _recordings_cache_at = now
+    files = _recordings_cache
+    resolution = "640x480"
+    try:
+        text = CONFIG.read_text(encoding="utf-8")
+        width = re.search(r"(?m)^input\.width=(\d+)$", text)
+        height = re.search(r"(?m)^input\.height=(\d+)$", text)
+        if width and height: resolution = f"{width.group(1)}x{height.group(1)}"
+    except OSError:
+        pass
+    media_running = alive(mediamtx_proc) or port_open(1935)
+    visuals = visualization_status()
+    return {"camera": "running" if camera_running else "stopped", "algorithm": "running" if algorithm_running else "stopped", "mediamtx": "running" if media_running else "stopped", "mediaMtx": "running" if media_running else "stopped", "raw_stream": f"http://{host}:8889/raw/", "stream": f"http://{host}:8889/sop/", "raw_stream_ready": raw_ready, "stream_ready": stream_ready, "rawStreamReady": raw_ready, "streamReady": stream_ready, "streamPath": "raw", "webrtcPort": 8889, "resolution": resolution, "algorithm_pid": algorithm_proc.pid if camera_running else None, "cameraPid": algorithm_proc.pid if camera_running else None, "fps": fps, "npu_latency_ms": read_number(NPU_LATENCY_FILE), "cpu_temperature_c": cpu_temperature_c(), "recording": mode or "stopped", "recording_dir": str(RECORDING_DIR), "recordings": files[:20], "latest_recording": files[0] if files else None, "hand_landmarks_visible": visuals["hand_landmarks"], "visualization": visuals}
+
+def _wait_for_stream(path_name, timeout):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:9997/v3/paths/list", timeout=0.4) as response:
+                payload = json.load(response)
+            if any(item.get("name") == path_name and item.get("ready") for item in payload.get("items", [])):
+                return True
+        except (OSError, ValueError):
+            pass
+        if not alive(algorithm_proc):
+            return False
+        time.sleep(0.2)
+    return False
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_): pass
     def send_json(self, code, value):

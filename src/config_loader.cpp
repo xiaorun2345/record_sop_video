@@ -48,6 +48,15 @@ static std::vector<std::string> SplitText(const std::string& text, const char de
   return values;
 }
 
+static std::vector<std::string> SplitPreserveEmpty(const std::string& text, const char delimiter) {
+  std::vector<std::string> values;
+  std::stringstream stream(text);
+  std::string item;
+  while (std::getline(stream, item, delimiter)) values.push_back(TrimText(item));
+  if (!text.empty() && text.back() == delimiter) values.emplace_back();
+  return values;
+}
+
 /**
  * @brief 解析布尔值。
  *
@@ -98,24 +107,33 @@ static bool ParseRoiValue(const std::string& value, RoiRegion* roi) {
 /**
  * @brief 解析 SOP 步骤配置。
  *
- * 格式示例：id|name|required_objects|hand_roi|min_frames|timeout|warning|optional_distance
+ * 格式示例：id|name|required_objects|hand_roi|min_frames|timeout|warning|optional_distance|min_stage|enabled
  *
  * required_objects 支持两种写法：
  *   - base,frame
  *   - cover_cloth:1,padding_board:2
+ *   - object_id~cover_cloth~1~roi_a+roi_b~target_id~overlaps
  */
 static bool ParseStepValue(const std::string& value, SopStepConfig* step) {
-  const std::vector<std::string> parts = SplitText(value, '|');
-  if ((parts.size() < 7 || parts.size() > 9) || step == nullptr) {
+  const std::vector<std::string> parts = SplitPreserveEmpty(value, '|');
+  if ((parts.size() < 7 || parts.size() > 10) || step == nullptr) {
     return false;
   }
   step->id = parts[0];
   step->name = parts[1];
   step->required_objects.clear();
   for (const std::string& item : SplitText(parts[2], ',')) {
+    const std::vector<std::string> rich_parts = SplitText(item, '~');
     const std::vector<std::string> object_parts = SplitText(item, ':');
     RequiredObjectConfig required_object;
-    if (object_parts.size() == 1) {
+    if (rich_parts.size() >= 3) {
+      required_object.id = rich_parts[0];
+      required_object.label = rich_parts[1];
+      required_object.min_count = std::stoi(rich_parts[2]);
+      if (rich_parts.size() >= 4 && rich_parts[3] != "-") required_object.roi_names = SplitText(rich_parts[3], '+');
+      if (rich_parts.size() >= 5 && rich_parts[4] != "-") required_object.relation_target_id = rich_parts[4];
+      if (rich_parts.size() >= 6 && rich_parts[5] != "-") required_object.relation_type = rich_parts[5];
+    } else if (object_parts.size() == 1) {
       required_object.label = object_parts[0];
       required_object.min_count = 1;
     } else if (object_parts.size() == 2) {
@@ -138,6 +156,9 @@ static bool ParseStepValue(const std::string& value, SopStepConfig* step) {
   }
   if (parts.size() >= 9) {
     step->min_stage_sec = std::stod(parts[8]);
+  }
+  if (parts.size() >= 10) {
+    step->enabled = ParseBoolValue(parts[9]);
   }
   return !step->id.empty() && !step->name.empty() && !step->required_objects.empty();
 }
@@ -226,6 +247,7 @@ bool ConfigLoader::Load(const std::string& file_path, SopAppConfig* config) cons
   }
 
   config->show_window = ParseBoolValue(kv["show_window"]);
+  if (kv.count("sop.execution_mode") > 0) config->execution_mode = kv["sop.execution_mode"];
   config->save_video = ParseBoolValue(kv["save_video"]);
   config->output_video_path = kv["output_video_path"];
 

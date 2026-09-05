@@ -1,1 +1,15 @@
-{"scripts":{"build":"vite build"},"dependencies":{"@vitejs/plugin-vue":"latest","vite":"latest","vue":"latest","vue-router":"latest","pinia":"latest"},"devDependencies":{}}
+{
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "latest",
+    "vite": "latest",
+    "vue": "latest",
+    "vue-router": "latest",
+    "pinia": "latest",
+    "element-plus": "2.14.5",
+    "@element-plus/icons-vue": "2.3.2"
+  },
+  "devDependencies": {}
+}

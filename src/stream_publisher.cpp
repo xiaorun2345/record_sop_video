@@ -45,7 +45,7 @@ bool StreamPublisher::Open(int width, int height, int fps, const std::string& ur
   std::string pipe = "appsrc name=src is-live=true block=false max-bytes=" + std::to_string(queue_bytes) +
       " format=time do-timestamp=true caps=\"video/x-raw,format=BGR,width=" + std::to_string(width) +
       ",height=" + std::to_string(height) + ",framerate=" + std::to_string(fps) + "/1\" ! queue leaky=downstream max-size-buffers=2 max-size-bytes=" +
-      std::to_string(queue_bytes) + " ! videoconvert ! video/x-raw,format=NV12 ! mpph264enc bps=2500000 gop=30 ! h264parse config-interval=1 ! flvmux streamable=true ! rtmpsink sync=false location=" + url;
+      std::to_string(queue_bytes) + " ! videoconvert ! video/x-raw,format=NV12 ! mpph264enc bps=2500000 gop=30 rc-mode=cbr header-mode=each-idr ! h264parse config-interval=1 ! flvmux streamable=true ! rtmpsink sync=false location=" + url;
   GError* error = nullptr;
   GstElement* pipeline = gst_parse_launch(pipe.c_str(), &error);
   if (!pipeline) { if (error) g_error_free(error); return false; }

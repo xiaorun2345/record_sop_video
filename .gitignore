@@ -18,3 +18,4 @@ config/network.json
 config/services.json
 config/storage_policy.json
 config/time.json
+config/active_sop_judgement.json

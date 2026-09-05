@@ -16,8 +16,9 @@ class Network(BaseModel):
     interface: str = "自动选择"; mode: str = "dhcp"; static_ip: str = ""; netmask: str = "255.255.255.0"; gateway: str = ""; dns: str = "8.8.8.8"; wifi_ssid: str = ""; wifi_password: str = ""
 
 @router.get("/device/overview")
-@router.get("/device/health")
 def overview(): return device_api.overview()
+@router.get("/device/health")
+def health(): return device_api.health()
 @router.get("/network")
 def network(): return device_api._network()
 @router.put("/device/identity")

@@ -1,10 +1,13 @@
 logLevel: info
-writeQueueSize: 32
+writeQueueSize: 8
 rtmp: yes
 rtmpAddress: :1935
 rtmpEncryption: "no"
 webrtc: yes
 webrtcAddress: :8889
+# Force clients on the factory WLAN to use the reachable interface instead
+# of occasionally selecting the loopback ICE candidate (127.0.0.1).
+webrtcAdditionalHosts: [192.168.77.58]
 hls: no
 api: yes
 apiAddress: :9997

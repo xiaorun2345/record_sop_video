@@ -9,6 +9,8 @@ NETWORK_FILE = ROOT / "config" / "network.json"
 TIME_FILE = ROOT / "config" / "time.json"
 STORAGE_FILE = ROOT / "config" / "storage_policy.json"
 SERVICES_FILE = ROOT / "config" / "services.json"
+RECORDING_DIR = ROOT / "output" / "recordings"
+LOG_DIR = ROOT / "runtime_logs"
 def _json(path, defaults):
     try: defaults.update(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, ValueError): pass
@@ -37,6 +39,177 @@ def _network():
     cfg = _json(NETWORK_FILE, {"interface":"自动选择", "mode":"dhcp", "static_ip":"", "netmask":"255.255.255.0", "gateway":"", "dns":"8.8.8.8", "wifi_ssid":""})
     return {**cfg, "ip": ip, "hostname": host, "mac": mac, "status": "已连接" if ip not in ("--", "127.0.0.1") else "未连接", "link_speed":"未知"}
 
+def _read_number(path):
+    try:
+        return float(path.read_text(encoding="utf-8").strip().split()[0])
+    except (OSError, ValueError):
+        return None
+
+def _thermal_zones():
+    zones = []
+    for zone in sorted(Path("/sys/class/thermal").glob("thermal_zone*")):
+        temp = _read_number(zone / "temp")
+        if temp is None:
+            continue
+        if temp > 200:
+            temp /= 1000.0
+        try:
+            kind = (zone / "type").read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            kind = zone.name
+        label = kind or zone.name
+        zones.append({"name": zone.name, "type": label, "label": label.upper(), "temperature_c": round(temp, 1)})
+    return zones
+
+def _cpu_temperature(zones):
+    if not zones:
+        return None
+    preferred = [z for z in zones if any(token in z["type"].lower() for token in ("cpu", "soc", "package"))]
+    source = preferred or zones
+    return max(z["temperature_c"] for z in source)
+
+def _memory():
+    values = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8", errors="ignore").splitlines():
+            key, value = line.split(":", 1)
+            values[key] = int(value.strip().split()[0]) * 1024
+    except (OSError, ValueError):
+        return {}
+    total = values.get("MemTotal", 0)
+    available = values.get("MemAvailable", 0)
+    used = max(total - available, 0)
+    return {
+        "total_gb": round(total / 1e9, 2),
+        "used_gb": round(used / 1e9, 2),
+        "free_gb": round(available / 1e9, 2),
+        "used_percent": round((used / total) * 100, 1) if total else 0,
+    }
+
+def _cpu_load():
+    try:
+        load1, load5, load15 = os.getloadavg()
+    except OSError:
+        return {}
+    cores = os.cpu_count() or 1
+    return {
+        "cores": cores,
+        "load1": round(load1, 2),
+        "load5": round(load5, 2),
+        "load15": round(load15, 2),
+        "load_percent": round(min(load1 / cores * 100, 100), 1),
+    }
+
+def _uptime_seconds():
+    value = _read_number(Path("/proc/uptime"))
+    return round(value) if value is not None else 0
+
+def _storage_health():
+    usage = shutil.disk_usage(ROOT)
+    policy = _json(STORAGE_FILE, {"auto_cleanup_days":30,"video_retention_enabled":True,"low_space_threshold_percent":10})
+    used_percent = round((usage.total - usage.free) / usage.total * 100, 1) if usage.total else 0
+    free_percent = round(usage.free / usage.total * 100, 1) if usage.total else 0
+    threshold = int(policy.get("low_space_threshold_percent") or 10)
+    status = "critical" if free_percent <= max(8, threshold / 2) else ("warning" if free_percent <= max(15, threshold) else "ok")
+    return {
+        "total_gb": round(usage.total/1e9, 2),
+        "used_gb": round((usage.total-usage.free)/1e9, 2),
+        "free_gb": round(usage.free/1e9, 2),
+        "used_percent": used_percent,
+        "free_percent": free_percent,
+        "low_space_threshold_percent": threshold,
+        "status": status,
+    }
+
+def storage_overview():
+    usage = shutil.disk_usage(ROOT)
+    recordings = []
+    if RECORDING_DIR.exists():
+        for path in RECORDING_DIR.iterdir():
+            if path.is_file() and path.suffix.lower() in (".mp4", ".avi", ".mkv"):
+                try:
+                    stat = path.stat()
+                    recordings.append({"filename": path.name, "size_bytes": stat.st_size, "modified_at": stat.st_mtime})
+                except OSError:
+                    continue
+    logs = []
+    if LOG_DIR.exists():
+        for path in LOG_DIR.glob("*.log"):
+            try:
+                logs.append({"filename": path.name, "size_bytes": path.stat().st_size})
+            except OSError:
+                continue
+    policy = _json(STORAGE_FILE, {"auto_cleanup_days": 30, "low_space_threshold_percent": 10})
+    return {
+        "disk": {
+            "total_gb": round(usage.total / 1e9, 2),
+            "used_gb": round((usage.total - usage.free) / 1e9, 2),
+            "free_gb": round(usage.free / 1e9, 2),
+            "used_percent": round((usage.total - usage.free) / usage.total * 100, 1) if usage.total else 0,
+            "free_percent": round(usage.free / usage.total * 100, 1) if usage.total else 0,
+            "status": _storage_health()["status"],
+        },
+        "recordings": {
+            "count": len(recordings),
+            "size_bytes": sum(item["size_bytes"] for item in recordings),
+            "size_gb": round(sum(item["size_bytes"] for item in recordings) / 1e9, 2),
+        },
+        "logs": {
+            "count": len(logs),
+            "size_bytes": sum(item["size_bytes"] for item in logs),
+            "size_kb": round(sum(item["size_bytes"] for item in logs) / 1024, 1),
+        },
+        "policy": {
+            "auto_cleanup_days": int(policy.get("auto_cleanup_days") or 30),
+            "low_space_threshold_percent": int(policy.get("low_space_threshold_percent") or 10),
+        },
+    }
+
+def recordings_before(days):
+    cutoff = time.time() - max(1, int(days)) * 86400
+    if not RECORDING_DIR.exists():
+        return []
+    items = []
+    for path in RECORDING_DIR.iterdir():
+        if path.is_file() and path.suffix.lower() in (".mp4", ".avi", ".mkv"):
+            try:
+                stat = path.stat()
+                if stat.st_mtime < cutoff:
+                    items.append({"filename": path.name, "size_bytes": stat.st_size, "modified_at": stat.st_mtime})
+            except OSError:
+                continue
+    return sorted(items, key=lambda item: item["modified_at"])
+
+def cleanup_recordings(days):
+    removed = []
+    for item in recordings_before(days):
+        path = RECORDING_DIR / item["filename"]
+        try:
+            path.unlink()
+            removed.append(item)
+        except OSError:
+            continue
+    return removed
+
+def health():
+    zones = _thermal_zones()
+    cpu_temp = _cpu_temperature(zones)
+    overview_data = overview()
+    return {
+        "summary": {
+            "status": "warning" if overview_data["storage"]["free_gb"] <= 2 else "ok",
+            "updated_at": time.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            "uptime_seconds": _uptime_seconds(),
+        },
+        "cpu": {**_cpu_load(), "temperature_c": cpu_temp},
+        "temperatures": zones,
+        "memory": _memory(),
+        "storage": _storage_health(),
+        "services": overview_data["services"],
+        "peripherals": overview_data["peripherals"],
+        "network": overview_data["network"],
+    }
+
 def overview():
     usage = shutil.disk_usage(ROOT)
     return {"identity": _identity(), "network": _network(), "time": time.strftime("%Y-%m-%d %H:%M:%S %Z"), "time_config": _json(TIME_FILE, {"timezone":"UTC", "ntp_enabled":True, "ntp_server":"pool.ntp.org"}), "storage": {"total_gb": round(usage.total/1e9, 2), "used_gb": round((usage.total-usage.free)/1e9, 2), "free_gb": round(usage.free/1e9, 2), **_json(STORAGE_FILE, {"auto_cleanup_days":30,"video_retention_enabled":True,"low_space_threshold_percent":10})}, "services": {"backend": "运行中", "mediamtx": "由算法服务按需管理", **_json(SERVICES_FILE, {"api_port":8080,"node_red_port":1880})}, "peripherals": {"alarm_light": {"connected": Path("/dev/ch341-light").exists(), "path": "/dev/ch341-light", "baudrate": 9600}}}
@@ -64,7 +237,7 @@ def restore_latest():
 def handle_get(path):
     if path == "/api/network": return 200, _network()
     if path == "/api/device/overview": return 200, overview()
-    if path == "/api/device/health": return 200, overview()
+    if path == "/api/device/health": return 200, health()
     if path == "/api/peripherals/alarm-light": return 200, overview()["peripherals"]["alarm_light"]
     return None
 

@@ -81,6 +81,8 @@ add_executable(rk3588_sop
   src/hand_pose_detector.cpp
   src/hand_skeleton_constraint.cpp
   src/sop_state_machine.cpp
+  src/sop_runtime_snapshot.cpp
+  src/visualization_flags.cpp
   src/visualizer.cpp
   src/stream_publisher.cpp
   third_party/hungarian_algorithm_cpp/Hungarian.cpp

@@ -1,0 +1,1306 @@
+/* Shared console layout; keep application navigation separate from editor panels. */
+.app-shell > aside { flex: 0 0 216px; width:216px; position:sticky; top:0; height:100dvh; min-height:0; padding:28px 16px; overflow-y:auto; align-self:flex-start; }
+.app-shell > aside .brand {font-size:23px; margin:0 0 30px; white-space:nowrap}
+.app-shell > aside nav a {font-size:14px; padding:12px; white-space:nowrap}
+.app-shell > aside .side-foot {margin-top:auto; transform:none; font-size:12px; overflow-wrap:anywhere}
+.app-shell > main > header {height:72px; padding:0 28px}
+.page,.page-content {max-width:1600px; margin:0 auto; padding:28px; min-width:0}
+.page-title {margin:0 0 24px; gap:16px}
+.page-title p {margin:6px 0 0; font-size:14px}
+.settings-page,.device-page {display:grid; gap:22px}
+.settings-page .page-title,.device-page .page-title {margin-bottom:0}
+.settings-status {box-shadow:none; padding:14px 18px; font-size:13px; flex-wrap:wrap}
+.settings-status span {white-space:normal}
+.cards,.device-top-grid {gap:22px; margin:0; align-items:stretch}
+.cards article,.device-top-grid > article {padding:24px; box-shadow:none; min-width:0}
+.cards h2,.device-top-grid h2 {padding-bottom:14px; margin-bottom:20px; border-bottom:1px solid #edf1f6; font-size:17px}
+.cards label,.device-top-grid > article:first-child label {display:flex; flex-direction:column; align-items:stretch; gap:8px; margin:0 0 18px; font-size:13px; font-weight:600}
+.cards input,.cards select,.device-top-grid input {width:100%; height:42px; padding:0 12px; border:1px solid #d7e0ec; border-radius:8px; color:#17243b; background:#fff; font-weight:400; min-width:0}
+.cards label:has(input[type=checkbox]) {flex-direction:row; justify-content:space-between; align-items:center; min-height:42px; padding:8px 12px; background:#f7f9fc; border-radius:8px}
+.cards input[type=checkbox] {width:20px; height:20px; margin:0; padding:0; accent-color:#126de9; cursor:pointer}
+.cards input:disabled {background:#f1f4f8; color:#8a96a7}
+.page button:not(.el-button) {color:#fff; min-height:40px}
+.page button.ghost {color:#126de9}
+.page .tabs button {color:#68778d}
+.page .tabs button.active {color:#126de9}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible {outline:3px solid #89b8fa; outline-offset:3px}
+.page button:not(:disabled):not(.el-button):hover {filter:brightness(.94)}
+.workbench .actions {align-items:center}
+.workbench .actions button {white-space:nowrap; flex:0 0 auto}
+.workbench .actions .compact-action {min-width:64px}
+.section-hint {min-height:38px; line-height:1.6; overflow-wrap:anywhere; margin-top:16px}
+.hint {font-size:13px; line-height:1.7}
+.settings-link {display:inline-block; color:#126de9; margin-top:12px; text-decoration:none; font-weight:600}
+.maintenance-actions {gap:12px}
+.maintenance-actions button {text-align:center}
+.action-log {grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px}
+.log-line {font-size:13px; overflow-wrap:anywhere}
+.online.is-error {color:#bc3d32; background:#fff0ee}
+.content-header {gap:20px; align-items:center; flex-wrap:wrap; margin-bottom:24px}
+.content-header > div:first-child {flex-wrap:wrap; gap:12px}
+.title-line h2 {font-size:24px}
+.sop-select {margin:0; width:210px}
+.sop-crud-actions {margin:0}
+.sop-config-shell .main-grid {grid-template-columns:240px minmax(0,1fr) 310px; grid-template-areas:'steps center right'; gap:20px}
+.sop-config-shell .main-grid > *, .center-column > *, .right-column > * {min-width:0}
+.sop-config-shell .step-panel {height:auto; max-height:520px; min-height:240px; padding:12px 0; overflow:auto}
+.sop-config-shell .list-tip {display:block}
+.sop-config-shell .flow-panel {min-height:0; padding:16px; overflow-x:auto}
+.sop-config-shell .flow-track {min-width:0; width:max-content; justify-content:flex-start; min-height:140px}
+.sop-config-shell .flow-step {flex-shrink:0}
+.sop-config-shell .camera-layout {grid-template-columns:minmax(0,1fr)}
+.sop-config-shell .camera-info {min-width:0; min-height:0; padding:18px; border:1px solid #e4eaf3; border-radius:8px}
+.sop-config-shell .camera-info dl {display:grid; grid-template-columns:100px minmax(0,1fr); gap:8px}
+.sop-config-shell .camera-info-actions {position:static; display:flex; flex-wrap:wrap; margin-top:16px}
+.sop-config-shell .roi-toolbar {flex-wrap:wrap; gap:8px}
+.sop-config-shell .roi-help {max-width:100%; min-width:0}
+.sop-config-shell .editor-panel {margin-top:0}
+.sop-config-shell .parameter-panel {padding:20px}
+.sop-config-shell .service-error {flex-wrap:wrap; margin-bottom:16px}
+@media(max-width:1400px) {
+ .app-shell > aside {width:190px; flex-basis:190px}
+ .page,.page-content {padding:22px}
+ .sop-config-shell .main-grid {grid-template-columns:220px minmax(0,1fr); grid-template-areas:'steps center' 'right right'}
+}
+@media(max-width:1000px) {
+ .app-shell > aside {width:168px; flex-basis:168px; padding:22px 10px}
+ .app-shell > aside .brand {font-size:19px}
+ .cards,.device-top-grid {grid-template-columns:minmax(0,1fr)}
+ .cards article.wide {grid-column:1/-1}
+ .sop-config-shell .main-grid {grid-template-columns:minmax(0,1fr); grid-template-areas:'steps' 'center' 'right'}
+ .sop-config-shell .step-panel {max-height:280px}
+}
+@media(max-width:640px) {
+ .app-shell {display:block}
+ .app-shell > aside {position:static; width:100%; height:auto; min-height:0; padding:12px; border-right:0; border-bottom:1px solid #e4eaf3}
+ .app-shell > aside .brand,.app-shell > aside .side-foot {display:none}
+ .app-shell > aside nav {grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px}
+ .app-shell > aside nav a {font-size:12px; padding:10px 2px; text-align:center}
+ .app-shell > main > header {height:auto; min-height:56px; padding:12px 16px; gap:10px; font-size:13px}
+ .app-shell > main > header .muted {display:none}
+ .page,.page-content {padding:16px}
+ .cards article,.device-top-grid > article {padding:18px}
+ .action-log,.form-grid {grid-template-columns:minmax(0,1fr)}
+ .settings-status {gap:8px}
+ .sop-config-shell .content-header > div:first-child {align-items:flex-start}
+ .el-dialog {max-width:calc(100vw - 24px)}
+}
+/* Independent columns prevent tall parameter cards from stretching the camera row. */
+.sop-config-shell .main-grid .center-column {grid-area:center; display:flex; flex-direction:column; gap:16px; min-width:0}
+.sop-config-shell .main-grid aside.right-column {grid-area:right; display:flex; flex-direction:column; gap:16px; min-width:0}
+.sop-config-shell .center-column > *, .sop-config-shell .right-column > * {grid-area:auto; width:100%}
+.sop-config-shell .flow-track {min-height:110px}
+.sop-config-shell .step-panel {min-height:0}
+
+.sop-config-shell .main-grid aside.step-panel {background:#fff; padding:12px 0; border:1px solid var(--border)}
+.sop-config-shell .main-grid aside.camera-info {background:#f8fafc; padding:18px; border:1px solid var(--border)}
+.sop-config-shell .camera-info-actions .el-button {width:auto; margin:0}
+
+/* Reference layout: list and flow above a wide camera, independent right rail. */
+.sop-config-shell .page-content {max-width:none}
+.sop-config-shell .main-grid {grid-template-columns:minmax(0,1fr) 320px; grid-template-areas:none; gap:20px; align-items:start}
+.sop-workspace-grid {display:grid; grid-template-columns:220px minmax(0,1fr); grid-template-areas:"steps flow" "editor editor"; gap:20px 16px; align-items:start; min-width:0}
+.sop-config-shell .main-grid .center-column {display:contents}
+.sop-config-shell .main-grid aside.right-column {grid-area:auto; gap:16px}
+.sop-config-shell .center-column > .flow-panel {grid-area:flow; height:260px; padding:20px}
+.sop-config-shell .center-column > .editor-panel {grid-area:editor; padding:18px}
+.sop-config-shell .main-grid aside.step-panel {height:260px; max-height:260px; min-height:0}
+.sop-config-shell .flow-track {min-height:100%; width:max-content; min-width:100%; justify-content:space-around; gap:10px}
+.sop-config-shell .flow-step {flex:0 0 90px}
+.sop-config-shell .camera-layout {grid-template-columns:minmax(0,1fr) 200px; gap:16px}
+.sop-config-shell .camera-info dl {display:block}
+.sop-config-shell .camera-info dt {margin-top:14px}
+.sop-config-shell .camera-info dd {margin:4px 0 0}
+.sop-config-shell .camera-info-actions {display:grid}
+.sop-config-shell .camera-info-actions .el-button {width:100%}
+.sop-config-shell .content-header {margin-bottom:16px}
+@media(max-width:1250px) {
+ .sop-config-shell .main-grid {grid-template-columns:minmax(0,1fr) 280px; gap:16px}
+ .sop-workspace-grid {grid-template-columns:180px minmax(0,1fr)}
+ .sop-config-shell .camera-layout {grid-template-columns:minmax(0,1fr)}
+ .sop-config-shell .camera-info dl {display:grid; grid-template-columns:100px minmax(0,1fr)}
+ .sop-config-shell .camera-info dt,.sop-config-shell .camera-info dd {margin:0}
+}
+@media(max-width:1000px) {
+ .sop-config-shell .main-grid {grid-template-columns:minmax(0,1fr)}
+ .sop-config-shell .main-grid aside.right-column {display:grid; grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:640px) {
+ .sop-workspace-grid {grid-template-columns:minmax(0,1fr); grid-template-areas:"steps" "flow" "editor"}
+ .sop-config-shell .main-grid aside.step-panel {height:auto; max-height:240px}
+ .sop-config-shell .center-column > .flow-panel {height:200px}
+ .sop-config-shell .main-grid aside.right-column {grid-template-columns:minmax(0,1fr)}
+}
+
+.device-page .health-card {grid-column:1/-1; padding:0; overflow:hidden}
+.health-heading {display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:24px 24px 18px; border-bottom:1px solid #edf1f6}
+.health-heading h2 {padding:0; margin:0 0 6px; border:0}
+.health-heading .hint {margin:0}
+.health-badge {flex:none; display:inline-flex; align-items:center; min-height:30px; padding:0 12px; border-radius:999px; font-size:12px; font-weight:800}
+.health-badge.is-ok {color:#07824f; background:#e9f8f0}
+.health-badge.is-warning {color:#9a6500; background:#fff4d7}
+.health-badge.is-critical {color:#c02b22; background:#fff0ee}
+.health-metrics {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; padding:18px 24px 8px}
+.health-metric {position:relative; padding:16px; border:1px solid #e3eaf4; border-radius:10px; background:linear-gradient(180deg,#fff,#f8fbff)}
+.health-metric::before {content:""; position:absolute; left:0; top:14px; bottom:14px; width:4px; border-radius:0 4px 4px 0; background:#19a566}
+.health-metric.is-warning::before {background:#e0a422}
+.health-metric.is-critical::before {background:#e64b45}
+.health-metric span,.chart-title small,.usage-row small {display:block; color:#738196; font-size:12px}
+.health-metric strong {display:block; margin:8px 0 4px; color:#17243b; font-size:24px; line-height:1.1}
+.health-metric.is-warning strong {color:#9a6500}
+.health-metric.is-critical strong {color:#c02b22}
+.health-chart-grid {display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:16px; padding:16px 24px 6px}
+.health-chart-panel {min-width:0; padding:16px; border:1px solid #e3eaf4; border-radius:10px; background:#fbfdff}
+.chart-title {display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px}
+.chart-title strong {font-size:15px}
+.usage-row,.temperature-row {display:grid; gap:8px; margin-bottom:14px}
+.usage-row:last-child,.temperature-row:last-child {margin-bottom:0}
+.usage-label {display:flex; align-items:center; justify-content:space-between; gap:10px}
+.usage-label span {color:#526078; font-size:13px; font-weight:700}
+.usage-label strong {font-size:14px; color:#17243b}
+.usage-bar,.temperature-track {height:10px; overflow:hidden; border-radius:999px; background:#edf2f8}
+.usage-bar i,.temperature-track i {display:block; height:100%; border-radius:999px; background:linear-gradient(90deg,#18a76b,#42c987)}
+.usage-row.is-warning .usage-bar i,.temperature-row.is-warning .temperature-track i {background:linear-gradient(90deg,#e2a72d,#f1c955)}
+.usage-row.is-critical .usage-bar i,.temperature-row.is-critical .temperature-track i {background:linear-gradient(90deg,#e64b45,#f0746e)}
+.health-status-list {display:grid; gap:10px}
+.hardware-status {display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:40px; padding:0 12px; border:1px solid #e3eaf4; border-radius:8px; background:#fff}
+.hardware-status span {color:#526078; font-size:13px; font-weight:700}
+.hardware-status strong {font-size:13px; color:#07824f; text-align:right}
+.hardware-status.is-warning strong {color:#9a6500}
+.hardware-status.is-critical strong {color:#c02b22}
+.empty-health {display:grid; min-height:120px; place-items:center; margin:0; color:#8a96a7; border:1px dashed #d6e0ec; border-radius:8px; background:#fff}
+.health-card.storage-warning {border-color:#f1d394}
+.health-card.storage-critical {border-color:#f0b1ac}
+
+@media(max-width:1200px) {
+ .health-metrics {grid-template-columns:repeat(2,minmax(0,1fr))}
+ .health-chart-grid {grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:640px) {
+ .health-heading {display:grid; padding:18px}
+ .health-metrics,.health-chart-grid {grid-template-columns:minmax(0,1fr); padding-left:18px; padding-right:18px}
+ .health-metric strong {font-size:21px}
+}
+
+.model-page {display:grid; gap:22px}
+.model-page .page-title {margin-bottom:0}
+.model-grid {display:grid; grid-template-columns:minmax(0,1.2fr) minmax(280px,.9fr) minmax(280px,.9fr); gap:22px; align-items:stretch}
+.model-card {min-width:0; padding:24px; background:#fff; border:1px solid #e2e9f3; border-radius:12px; box-shadow:none}
+.detector-card {grid-row:span 2}
+.model-card-head {display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding-bottom:18px; margin-bottom:18px; border-bottom:1px solid #edf1f6}
+.model-card h2 {margin:6px 0 8px; font-size:18px}
+.model-card p {margin:0; color:#708096; line-height:1.7}
+.model-kind {display:inline-flex; align-items:center; min-height:24px; padding:0 9px; border-radius:999px; color:#126de9; background:#edf4ff; font-size:12px; font-weight:800}
+.model-kind.fixed {color:#59687c; background:#eef2f7}
+.model-state {flex:none; display:inline-flex; align-items:center; min-height:28px; padding:0 10px; border-radius:999px; color:#07824f; background:#e9f8f0; font-size:12px; font-weight:800}
+.model-state.missing {color:#c02b22; background:#fff0ee}
+.active-model {display:grid; gap:6px; padding:14px; margin-bottom:18px; border:1px solid #e3eaf4; border-radius:10px; background:#f9fbfe}
+.active-model span {color:#738196; font-size:12px; font-weight:700}
+.active-model strong {font-size:14px; color:#17243b; overflow-wrap:anywhere}
+.model-card label {display:flex; flex-direction:column; gap:8px; margin:0 0 16px; color:#526078; font-size:13px; font-weight:700}
+.model-card input,.model-card select,.model-card textarea {width:100%; min-width:0; border:1px solid #d7e0ec; border-radius:8px; color:#17243b; background:#fff; font:inherit; font-weight:400}
+.model-card input,.model-card select {height:42px; padding:0 12px}
+.model-card textarea {resize:vertical; padding:12px; line-height:1.6}
+.model-card input:disabled {background:#f1f4f8; color:#8a96a7}
+.model-form {gap:0 16px}
+.upload-button {display:inline-flex!important; align-items:center!important; justify-content:center; width:auto; min-height:40px; padding:10px 14px; margin:0!important; border-radius:6px; color:#126de9!important; background:#edf4ff; cursor:pointer}
+.upload-button input {display:none}
+.config-actions-card {display:flex; align-items:center; justify-content:space-between; gap:20px}
+.config-actions-card h2 {margin:0 0 6px}
+.config-actions-card button {flex:none}
+
+@media(max-width:1200px) {
+ .model-grid {grid-template-columns:minmax(0,1fr)}
+ .detector-card {grid-row:auto}
+ .config-actions-card {align-items:flex-start; flex-direction:column}
+}
+
+/* Tech console polish: background stays behind readable content. */
+:root {
+  --console-surface: rgba(255, 255, 255, 0.94);
+  --console-surface-strong: rgba(255, 255, 255, 0.98);
+  --console-border: #dbe7f4;
+  --console-text: #102033;
+  --console-muted: #65748c;
+  --console-blue: #1769e8;
+  --console-cyan: #38bdf8;
+  --console-shadow: 0 18px 42px rgba(23, 64, 122, 0.10);
+}
+
+html, body, #app {
+  min-height: 100%;
+}
+
+body {
+  color: var(--console-text);
+  background: #edf4fb;
+  font-family: Inter, "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.app-shell {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+}
+
+.app-shell::before,
+.app-shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.app-shell::before {
+  z-index: 0;
+  background:
+    radial-gradient(circle at 16% 12%, rgba(23, 105, 232, 0.14), transparent 30%),
+    radial-gradient(circle at 84% 6%, rgba(56, 189, 248, 0.16), transparent 28%),
+    radial-gradient(circle at 72% 86%, rgba(72, 93, 255, 0.10), transparent 34%),
+    linear-gradient(135deg, #f7fbff 0%, #edf4fb 45%, #f8fbff 100%);
+}
+
+.app-shell::after {
+  z-index: 0;
+  opacity: 0.30;
+  background-image:
+    linear-gradient(rgba(23, 105, 232, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 105, 232, 0.09) 1px, transparent 1px),
+    linear-gradient(135deg, transparent 0 47%, rgba(56, 189, 248, 0.12) 48% 52%, transparent 53% 100%);
+  background-size: 44px 44px, 44px 44px, 220px 220px;
+  mask-image: linear-gradient(180deg, rgba(0,0,0,0.82), rgba(0,0,0,0.36));
+}
+
+.app-shell > aside,
+.app-shell > main {
+  position: relative;
+  z-index: 1;
+}
+
+.app-shell > aside {
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,252,255,0.94));
+  box-shadow: 16px 0 38px rgba(38, 80, 140, 0.08);
+}
+
+.app-shell header,
+.video-card,
+.job-card,
+.metric,
+.cards article,
+.device-top-grid > article,
+.panel,
+.model-card,
+.settings-status,
+.modal-card,
+.sop-page .flow-card,
+.sop-page .step-list-card,
+.sop-page .step-config-card,
+.sop-page .sop-side-card,
+.sop-page .sop-param-card {
+  background: var(--console-surface);
+  border-color: var(--console-border);
+  box-shadow: var(--console-shadow);
+  backdrop-filter: blur(14px);
+}
+
+.app-shell header {
+  background: rgba(255,255,255,0.90);
+}
+
+.page-title h1,
+.page-title h2,
+.title-line h2,
+.cards h2,
+.cards h3,
+.panel h2,
+.panel h3,
+.model-card h2,
+.model-card h3,
+.sop-page h2,
+.sop-page h3 {
+  color: var(--console-text);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.muted,
+.hint,
+small,
+.model-muted,
+.stat-card span,
+.device-status-list span,
+.device-info-list span,
+.sop-page .meta,
+.sop-page .step-code {
+  color: var(--console-muted);
+}
+
+input,
+select,
+textarea {
+  color: var(--console-text);
+  transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(23, 105, 232, 0.75) !important;
+  box-shadow: 0 0 0 4px rgba(23, 105, 232, 0.12);
+}
+
+button,
+.button,
+.upload-button {
+  transition: transform .14s ease, box-shadow .14s ease, filter .14s ease, background-color .14s ease, border-color .14s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled):hover,
+.button:not(:disabled):hover,
+.upload-button:hover {
+  filter: brightness(1.02);
+}
+
+button:not(:disabled):active,
+.button:not(:disabled):active,
+.upload-button:active {
+  transform: translateY(1px) scale(0.985);
+  box-shadow: 0 4px 12px rgba(23, 105, 232, 0.18) !important;
+}
+
+button:focus-visible,
+.button:focus-visible,
+.upload-button:focus-visible {
+  outline: 3px solid rgba(23, 105, 232, 0.22);
+  outline-offset: 2px;
+}
+
+button:disabled,
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.ghost,
+button.ghost,
+.workbench .actions .compact-action {
+  color: #0e63d5;
+  background: linear-gradient(180deg, #f5f9ff, #eaf3ff);
+  border: 1px solid #b9d8ff;
+  box-shadow: 0 6px 16px rgba(23, 105, 232, 0.08);
+}
+
+.workbench .actions {
+  align-items: center;
+  gap: 10px;
+}
+
+.workbench .actions button {
+  white-space: nowrap;
+  flex: 0 0 auto;
+  min-height: 38px;
+}
+
+.workbench .actions .export-action {
+  min-width: 92px;
+  padding-inline: 16px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.video-stage {
+  background: radial-gradient(circle at 50% 50%, #101d31 0%, #07111f 62%, #050b14 100%);
+  border: 1px solid rgba(83, 114, 160, 0.32);
+  box-shadow: inset 0 0 42px rgba(23, 105, 232, 0.08);
+}
+
+.video-stage video {
+  background: transparent;
+}
+
+.cards article,
+.device-top-grid > article,
+.panel,
+.model-card,
+.sop-page .flow-card,
+.sop-page .step-config-card,
+.sop-page .sop-side-card,
+.sop-page .sop-param-card {
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+
+.cards article:hover,
+.device-top-grid > article:hover,
+.model-card:hover,
+.sop-page .flow-card:hover,
+.sop-page .step-config-card:hover {
+  transform: translateY(-1px);
+  border-color: #c8dcf5;
+  box-shadow: 0 20px 48px rgba(23, 64, 122, 0.13);
+}
+
+.toast {
+  background: rgba(16, 32, 51, 0.94);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+}
+
+.status-ok,
+.health-ok,
+.model-status-ready {
+  color: #138a4b;
+}
+
+.status-warn,
+.health-warn,
+.model-status-warn {
+  color: #c2410c;
+}
+
+.status-error,
+.health-error,
+.model-status-error {
+  color: #dc2626;
+}
+
+/* Generated technology background image. */
+.app-shell::before {
+  background:
+    linear-gradient(180deg, rgba(246,250,255,0.28), rgba(238,245,252,0.38)),
+    url('/assets/console-tech-bg.png') center center / cover no-repeat,
+    linear-gradient(135deg, #f7fbff 0%, #edf4fb 48%, #f8fbff 100%);
+}
+
+.app-shell::after {
+  opacity: 0.22;
+  background-image:
+    linear-gradient(rgba(23, 105, 232, 0.075) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 105, 232, 0.075) 1px, transparent 1px);
+  background-size: 48px 48px, 48px 48px;
+  mask-image: linear-gradient(180deg, rgba(0,0,0,0.58), rgba(0,0,0,0.20));
+}
+
+.app-shell.route-workbench::before {
+  background:
+    radial-gradient(circle at 76% 22%, rgba(23,105,232,0.10), transparent 26%),
+    linear-gradient(180deg, rgba(246,250,255,0.24), rgba(238,245,252,0.34)),
+    url('/assets/console-tech-bg.png') center center / cover no-repeat,
+    linear-gradient(135deg, #f7fbff 0%, #edf4fb 48%, #f8fbff 100%);
+}
+
+.app-shell.route-sop::before,
+.app-shell.sop-config-shell::before {
+  background:
+    radial-gradient(circle at 18% 78%, rgba(56,189,248,0.11), transparent 24%),
+    linear-gradient(180deg, rgba(248,251,255,0.22), rgba(240,247,255,0.36)),
+    url('/assets/console-tech-bg.png') center center / cover no-repeat,
+    linear-gradient(135deg, #f7fbff 0%, #edf4fb 48%, #f8fbff 100%);
+}
+
+.app-shell.route-device::before {
+  background:
+    radial-gradient(circle at 86% 78%, rgba(34,197,94,0.08), transparent 24%),
+    linear-gradient(180deg, rgba(247,251,255,0.25), rgba(238,247,252,0.38)),
+    url('/assets/console-tech-bg.png') center center / cover no-repeat,
+    linear-gradient(135deg, #f7fbff 0%, #edf4fb 48%, #f8fbff 100%);
+}
+
+.app-shell.route-models::before {
+  background:
+    radial-gradient(circle at 80% 18%, rgba(99,102,241,0.10), transparent 24%),
+    linear-gradient(180deg, rgba(248,250,255,0.25), rgba(240,245,255,0.38)),
+    url('/assets/console-tech-bg.png') center center / cover no-repeat,
+    linear-gradient(135deg, #f7fbff 0%, #edf4fb 48%, #f8fbff 100%);
+}
+
+.app-shell.route-settings::before {
+  background:
+    radial-gradient(circle at 70% 84%, rgba(14,165,233,0.09), transparent 25%),
+    linear-gradient(180deg, rgba(248,252,255,0.27), rgba(239,246,252,0.40)),
+    url('/assets/console-tech-bg.png') center center / cover no-repeat,
+    linear-gradient(135deg, #f7fbff 0%, #edf4fb 48%, #f8fbff 100%);
+}
+
+.app-shell > aside,
+.app-shell header,
+.video-card,
+.job-card,
+.metric,
+.cards article,
+.device-top-grid > article,
+.panel,
+.model-card,
+.settings-status,
+.modal-card,
+.sop-page .flow-card,
+.sop-page .step-list-card,
+.sop-page .step-config-card,
+.sop-page .sop-side-card,
+.sop-page .sop-param-card {
+  background-color: rgba(255,255,255,0.955);
+}
+
+.app-shell > main {
+  background: rgba(245, 249, 254, 0.36);
+}
+
+/* Dark cyber console theme based on generated background. */
+:root {
+  --console-surface: rgba(7, 22, 39, 0.84);
+  --console-surface-strong: rgba(8, 27, 48, 0.92);
+  --console-border: rgba(25, 160, 235, 0.38);
+  --console-text: #e7f6ff;
+  --console-muted: #8fb3d0;
+  --console-blue: #18a8ff;
+  --console-cyan: #20e6ff;
+  --console-shadow: 0 18px 52px rgba(0, 8, 20, 0.42), inset 0 0 0 1px rgba(66, 202, 255, 0.05);
+}
+
+body {
+  color: var(--console-text);
+  background: #020a14;
+}
+
+.app-shell::before {
+  background:
+    linear-gradient(180deg, rgba(2,10,20,0.10), rgba(2,10,20,0.30)),
+    url('/assets/console-tech-bg-dark.png') center center / cover no-repeat,
+    #020a14;
+}
+
+.app-shell::after {
+  opacity: 0.26;
+  background-image:
+    linear-gradient(rgba(32, 230, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(32, 230, 255, 0.055) 1px, transparent 1px),
+    radial-gradient(circle at 50% 8%, rgba(24, 168, 255, 0.18), transparent 34%);
+  background-size: 44px 44px, 44px 44px, 100% 100%;
+  mask-image: linear-gradient(180deg, rgba(0,0,0,0.64), rgba(0,0,0,0.18));
+}
+
+.app-shell.route-workbench::before {
+  background:
+    radial-gradient(circle at 72% 18%, rgba(24,168,255,0.16), transparent 28%),
+    linear-gradient(180deg, rgba(2,10,20,0.08), rgba(2,10,20,0.28)),
+    url('/assets/console-tech-bg-dark.png') center center / cover no-repeat,
+    #020a14;
+}
+
+.app-shell.route-sop::before,
+.app-shell.sop-config-shell::before {
+  background:
+    radial-gradient(circle at 18% 82%, rgba(32,230,255,0.15), transparent 27%),
+    linear-gradient(180deg, rgba(2,10,20,0.08), rgba(2,10,20,0.26)),
+    url('/assets/console-tech-bg-dark.png') center center / cover no-repeat,
+    #020a14;
+}
+
+.app-shell.route-device::before {
+  background:
+    radial-gradient(circle at 84% 80%, rgba(34,197,94,0.12), transparent 26%),
+    linear-gradient(180deg, rgba(2,10,20,0.08), rgba(2,10,20,0.30)),
+    url('/assets/console-tech-bg-dark.png') center center / cover no-repeat,
+    #020a14;
+}
+
+.app-shell.route-models::before {
+  background:
+    radial-gradient(circle at 80% 18%, rgba(99,102,241,0.18), transparent 28%),
+    linear-gradient(180deg, rgba(2,10,20,0.08), rgba(2,10,20,0.30)),
+    url('/assets/console-tech-bg-dark.png') center center / cover no-repeat,
+    #020a14;
+}
+
+.app-shell.route-settings::before {
+  background:
+    radial-gradient(circle at 72% 84%, rgba(14,165,233,0.15), transparent 27%),
+    linear-gradient(180deg, rgba(2,10,20,0.08), rgba(2,10,20,0.30)),
+    url('/assets/console-tech-bg-dark.png') center center / cover no-repeat,
+    #020a14;
+}
+
+.app-shell > main {
+  background: rgba(2, 10, 20, 0.08);
+}
+
+.app-shell > aside,
+.app-shell header,
+.video-card,
+.job-card,
+.metric,
+.cards article,
+.device-top-grid > article,
+.panel,
+.model-card,
+.settings-status,
+.modal-card,
+.sop-page .flow-card,
+.sop-page .step-list-card,
+.sop-page .step-config-card,
+.sop-page .sop-side-card,
+.sop-page .sop-param-card {
+  color: var(--console-text);
+  background: linear-gradient(180deg, rgba(8, 28, 50, 0.88), rgba(5, 18, 33, 0.82));
+  background-color: rgba(7, 22, 39, 0.86);
+  border: 1px solid rgba(32, 230, 255, 0.24);
+  box-shadow: var(--console-shadow);
+  backdrop-filter: blur(12px);
+}
+
+.app-shell > aside {
+  background: linear-gradient(180deg, rgba(5,18,34,0.95), rgba(3,12,24,0.92));
+  box-shadow: 12px 0 36px rgba(0, 10, 24, 0.46), inset -1px 0 0 rgba(32,230,255,0.22);
+}
+
+.app-shell .brand,
+.page-title h1,
+.page-title h2,
+.title-line h2,
+.cards h2,
+.cards h3,
+.panel h2,
+.panel h3,
+.model-card h2,
+.model-card h3,
+.sop-page h2,
+.sop-page h3,
+.job-card h2,
+.metric strong,
+.step-current {
+  color: #f1fbff;
+  text-shadow: 0 0 16px rgba(32, 230, 255, 0.18);
+}
+
+.app-shell .brand span,
+.online,
+.model-kind,
+.sop-page .step-dot,
+.fps,
+.stream-tag {
+  color: #38e8ff;
+}
+
+.muted,
+.hint,
+small,
+.model-muted,
+.stat-card span,
+.device-status-list span,
+.device-info-list span,
+.sop-page .meta,
+.sop-page .step-code,
+.section-hint,
+.model-card label,
+.cards label,
+.device-top-grid label,
+.panel label {
+  color: var(--console-muted);
+}
+
+.app-shell nav a {
+  color: #9ec7e7;
+  border: 1px solid transparent;
+}
+
+.app-shell nav a:hover {
+  color: #e7f8ff;
+  background: rgba(24, 168, 255, 0.10);
+  border-color: rgba(32, 230, 255, 0.22);
+}
+
+.app-shell nav a.router-link-active {
+  color: #f2fcff;
+  background: linear-gradient(90deg, rgba(24,168,255,0.72), rgba(32,230,255,0.30));
+  border-color: rgba(32, 230, 255, 0.56);
+  box-shadow: 0 0 24px rgba(24,168,255,0.22), inset 0 0 18px rgba(32,230,255,0.10);
+}
+
+input,
+select,
+textarea,
+.model-card input,
+.model-card select,
+.model-card textarea,
+.sop-page input,
+.sop-page select,
+.sop-page textarea {
+  color: #e9f8ff;
+  background: rgba(3, 13, 25, 0.70);
+  border-color: rgba(94, 185, 235, 0.30);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgba(143, 179, 208, 0.68);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled,
+.model-card input:disabled {
+  color: rgba(143, 179, 208, 0.58);
+  background: rgba(9, 24, 40, 0.58);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: rgba(32, 230, 255, 0.74) !important;
+  box-shadow: 0 0 0 3px rgba(32, 230, 255, 0.12), 0 0 24px rgba(24, 168, 255, 0.14);
+}
+
+button,
+.button,
+.upload-button {
+  color: #f1fbff;
+  background: linear-gradient(180deg, #1687f5, #0c5fd1);
+  border: 1px solid rgba(74, 210, 255, 0.34);
+  box-shadow: 0 10px 24px rgba(4, 112, 220, 0.28), inset 0 1px 0 rgba(255,255,255,0.16);
+}
+
+.ghost,
+button.ghost,
+.workbench .actions .compact-action,
+.upload-button {
+  color: #bff6ff !important;
+  background: linear-gradient(180deg, rgba(11,54,88,0.82), rgba(5,30,55,0.78));
+  border: 1px solid rgba(32, 230, 255, 0.42);
+  box-shadow: 0 0 18px rgba(24, 168, 255, 0.14), inset 0 0 16px rgba(32, 230, 255, 0.05);
+}
+
+button:not(:disabled):hover,
+.button:not(:disabled):hover,
+.upload-button:hover {
+  filter: brightness(1.10);
+  border-color: rgba(32, 230, 255, 0.70);
+}
+
+button:not(:disabled):active,
+.button:not(:disabled):active,
+.upload-button:active {
+  transform: translateY(1px) scale(0.985);
+  box-shadow: 0 4px 14px rgba(24, 168, 255, 0.22), inset 0 0 18px rgba(0,0,0,0.18) !important;
+}
+
+button.danger,
+.danger {
+  color: #ffe9e9;
+  background: linear-gradient(180deg, #d84e5b, #9f1d32);
+  border-color: rgba(255, 120, 132, 0.45);
+}
+
+.tabs button,
+.inline-actions button,
+.step-toolbar button {
+  color: #b9e7ff;
+}
+
+.tabs button.active,
+.step-row.active,
+.sop-page .step-list li.active {
+  color: #f2fcff;
+  background: rgba(24, 168, 255, 0.18);
+  border-color: rgba(32, 230, 255, 0.42);
+}
+
+.settings-status.is-success,
+.settings-status.is-info {
+  background: linear-gradient(180deg, rgba(7,38,58,0.88), rgba(5,22,39,0.82));
+}
+
+.settings-status.is-error,
+.settings-status.is-warning,
+.health-warn-card,
+.storage-warning {
+  background: linear-gradient(180deg, rgba(70, 28, 14, 0.88), rgba(36, 18, 13, 0.84));
+  border-color: rgba(251, 146, 60, 0.42);
+}
+
+.video-stage {
+  background: radial-gradient(circle at 50% 50%, #0b1a2e 0%, #030a13 68%, #02060d 100%);
+  border-color: rgba(32, 230, 255, 0.32);
+}
+
+.progress,
+.sop-page .flow-line,
+.health-bar,
+.storage-bar {
+  background: rgba(11, 37, 62, 0.82);
+}
+
+.progress i,
+.health-bar i,
+.storage-bar i {
+  background: linear-gradient(90deg, #18a8ff, #20e6ff);
+  box-shadow: 0 0 16px rgba(32,230,255,0.28);
+}
+
+.el-message,
+.el-notification,
+.toast {
+  color: #eaf8ff;
+  background: rgba(6, 21, 37, 0.96);
+  border: 1px solid rgba(32, 230, 255, 0.32);
+}
+
+/* Final dark-theme sweep: remove remaining white/light panels. */
+:root {
+  --bg: #020a14;
+  --border: rgba(32, 230, 255, 0.26);
+  --text: #e7f6ff;
+  --muted: #8fb3d0;
+  --surface: rgba(7, 22, 39, 0.86);
+  --surface-2: rgba(9, 31, 55, 0.78);
+}
+
+.app-shell,
+.app-shell > main,
+.page,
+.sop-page,
+.sop-shell,
+.workspace,
+.content,
+.main-grid,
+.center-column,
+.right-column {
+  color: var(--console-text);
+  background-color: transparent !important;
+}
+
+.side-foot,
+.current-device,
+.device-card,
+.identity-card,
+.info-card,
+.status-card,
+.summary-card,
+.stat-card,
+.metric-card,
+.config-card,
+.flow-card,
+.step-panel,
+.camera-info,
+.camera-info-card,
+.step-list-card,
+.step-config-card,
+.sop-side-card,
+.sop-param-card,
+.health-metric,
+.health-chart-panel,
+.hardware-status,
+.empty-health,
+.active-model,
+.log-line,
+.section-hint,
+.video-item,
+.upload-zone,
+.object-row,
+.rule-row,
+.condition-row,
+.roi-panel,
+.drawer,
+.popover,
+.dropdown,
+.el-card,
+.el-drawer,
+.el-dialog,
+.el-dialog__body,
+.el-popper,
+.el-select-dropdown,
+.el-dropdown-menu,
+.el-table,
+.el-table__header-wrapper,
+.el-table__body-wrapper,
+.el-table tr,
+.el-table th,
+.el-table td {
+  color: var(--console-text) !important;
+  background: linear-gradient(180deg, rgba(8, 28, 50, 0.88), rgba(5, 18, 33, 0.82)) !important;
+  background-color: rgba(7, 22, 39, 0.86) !important;
+  border-color: rgba(32, 230, 255, 0.24) !important;
+  box-shadow: 0 14px 38px rgba(0, 8, 20, 0.36), inset 0 0 0 1px rgba(66, 202, 255, 0.04) !important;
+}
+
+.side-foot {
+  border: 1px solid rgba(32, 230, 255, 0.22);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.side-foot small,
+.side-foot span,
+.current-device small,
+.current-device span,
+.device-card small,
+.info-card small,
+.status-card small,
+.summary-card small,
+.stat-card small,
+.metric-card small,
+.config-card small,
+.flow-card small,
+.step-panel small,
+.camera-info small,
+.health-metric small,
+.active-model span,
+.video-item small,
+.el-table .cell,
+.el-form-item__label {
+  color: var(--console-muted) !important;
+}
+
+.side-foot strong,
+.current-device strong,
+.device-card strong,
+.info-card strong,
+.status-card strong,
+.summary-card strong,
+.stat-card strong,
+.metric-card strong,
+.config-card strong,
+.flow-card strong,
+.step-panel strong,
+.camera-info strong,
+.health-metric strong,
+.active-model strong,
+.el-dialog__title,
+.el-drawer__title {
+  color: #f1fbff !important;
+}
+
+.cards label:has(input[type=checkbox]),
+.check-row,
+.switch-row,
+.setting-row,
+.list-row,
+.step-row,
+.sop-page .step-list li,
+.sop-page .flow-node,
+.model-list-item,
+.file-row,
+.log-row,
+.health-row,
+.storage-row,
+.network-row {
+  color: var(--console-text) !important;
+  background: rgba(6, 24, 43, 0.72) !important;
+  border-color: rgba(32, 230, 255, 0.20) !important;
+}
+
+.sop-page .step-list li.active,
+.step-row.active,
+.model-list-item.active,
+.file-row.active,
+.tabs button.active {
+  color: #f2fcff !important;
+  background: linear-gradient(90deg, rgba(24, 168, 255, 0.26), rgba(32, 230, 255, 0.10)) !important;
+  border-color: rgba(32, 230, 255, 0.46) !important;
+  box-shadow: 0 0 22px rgba(24, 168, 255, 0.16) !important;
+}
+
+.health-badge,
+.badge,
+.tag,
+.el-tag,
+.online,
+.model-state {
+  color: #bff6ff !important;
+  background: rgba(8, 42, 70, 0.82) !important;
+  border-color: rgba(32, 230, 255, 0.32) !important;
+}
+
+.health-badge.is-warning,
+.health-badge.is-critical,
+.model-state.missing,
+.online.is-error,
+.status-warn,
+.status-error {
+  color: #ffd6a3 !important;
+  background: rgba(68, 30, 13, 0.82) !important;
+  border-color: rgba(251, 146, 60, 0.42) !important;
+}
+
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner,
+.el-input__inner,
+.el-input-number,
+.el-input-number__decrease,
+.el-input-number__increase {
+  color: #e9f8ff !important;
+  background: rgba(3, 13, 25, 0.72) !important;
+  border-color: rgba(94, 185, 235, 0.28) !important;
+  box-shadow: inset 0 0 0 1px rgba(94, 185, 235, 0.18) !important;
+}
+
+.el-input__inner,
+.el-textarea__inner,
+.el-select__placeholder,
+.el-select-dropdown__item,
+.el-input-number__decrease,
+.el-input-number__increase {
+  color: #e9f8ff !important;
+}
+
+.el-select-dropdown__item.hover,
+.el-select-dropdown__item:hover,
+.el-dropdown-menu__item:hover,
+.el-table__row:hover > td {
+  color: #f2fcff !important;
+  background: rgba(24, 168, 255, 0.18) !important;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: #20e6ff;
+}
+
+hr,
+.divider,
+.el-divider {
+  border-color: rgba(32, 230, 255, 0.20) !important;
+}
+
+::selection {
+  color: #00121f;
+  background: rgba(32, 230, 255, 0.78);
+}
+
+/* Hard override for remaining light form and side panels. */
+.app-shell .job-card,
+.app-shell .video-card,
+.app-shell .metric,
+.app-shell .cards article,
+.app-shell .device-top-grid > article,
+.app-shell .model-card,
+.app-shell .panel,
+.app-shell .settings-status,
+.app-shell .modal-card,
+.app-shell .side-foot,
+.app-shell .sop-page .step-panel,
+.app-shell .sop-page .camera-info,
+.app-shell .sop-page .flow-card,
+.app-shell .sop-page .step-config-card,
+.app-shell .sop-page .sop-side-card,
+.app-shell .sop-page .sop-param-card,
+.app-shell .work-grid > .job-card {
+  color: #e7f6ff !important;
+  background: linear-gradient(180deg, rgba(8, 28, 50, 0.92), rgba(4, 16, 31, 0.88)) !important;
+  border-color: rgba(32, 230, 255, 0.30) !important;
+}
+
+.app-shell label,
+.app-shell .cards label,
+.app-shell .device-top-grid label,
+.app-shell .model-card label,
+.app-shell .panel label,
+.app-shell .sop-page label {
+  color: #9fc6e2 !important;
+  background: transparent !important;
+}
+
+.app-shell .cards label:has(input[type="checkbox"]),
+.app-shell .cards label:has(input[type="radio"]),
+.app-shell label.switch-row,
+.app-shell label.check-row {
+  background: rgba(4, 18, 34, 0.72) !important;
+  border: 1px solid rgba(32, 230, 255, 0.18) !important;
+}
+
+.app-shell input,
+.app-shell select,
+.app-shell textarea,
+.app-shell input[type="text"],
+.app-shell input[type="number"],
+.app-shell input[type="password"],
+.app-shell input[type="search"],
+.app-shell .cards input,
+.app-shell .cards select,
+.app-shell .device-top-grid input,
+.app-shell .device-top-grid select,
+.app-shell .model-card input,
+.app-shell .model-card select,
+.app-shell .model-card textarea,
+.app-shell .panel input,
+.app-shell .panel select,
+.app-shell .panel textarea,
+.app-shell .sop-page input,
+.app-shell .sop-page select,
+.app-shell .sop-page textarea {
+  color: #e9f8ff !important;
+  caret-color: #20e6ff !important;
+  background: linear-gradient(180deg, rgba(3, 13, 25, 0.92), rgba(6, 23, 42, 0.88)) !important;
+  border: 1px solid rgba(94, 185, 235, 0.34) !important;
+  box-shadow: inset 0 0 0 1px rgba(32, 230, 255, 0.05), 0 0 0 0 rgba(32, 230, 255, 0) !important;
+}
+
+.app-shell input:hover,
+.app-shell select:hover,
+.app-shell textarea:hover,
+.app-shell .el-input__wrapper:hover,
+.app-shell .el-select__wrapper:hover {
+  border-color: rgba(32, 230, 255, 0.56) !important;
+  box-shadow: inset 0 0 0 1px rgba(32, 230, 255, 0.14), 0 0 16px rgba(24, 168, 255, 0.10) !important;
+}
+
+.app-shell input:focus,
+.app-shell select:focus,
+.app-shell textarea:focus,
+.app-shell input:focus-visible,
+.app-shell select:focus-visible,
+.app-shell textarea:focus-visible {
+  outline: none !important;
+  border-color: rgba(32, 230, 255, 0.78) !important;
+  box-shadow: inset 0 0 0 1px rgba(32, 230, 255, 0.18), 0 0 0 3px rgba(32, 230, 255, 0.14), 0 0 24px rgba(24, 168, 255, 0.18) !important;
+}
+
+.app-shell input:disabled,
+.app-shell select:disabled,
+.app-shell textarea:disabled,
+.app-shell .model-card input:disabled,
+.app-shell .cards input:disabled {
+  color: rgba(159, 198, 226, 0.56) !important;
+  background: rgba(7, 19, 34, 0.78) !important;
+  border-color: rgba(94, 185, 235, 0.16) !important;
+}
+
+.app-shell input::placeholder,
+.app-shell textarea::placeholder {
+  color: rgba(159, 198, 226, 0.58) !important;
+}
+
+.app-shell input[type="number"]::-webkit-inner-spin-button,
+.app-shell input[type="number"]::-webkit-outer-spin-button {
+  filter: invert(1) hue-rotate(150deg) brightness(1.25);
+  opacity: 0.72;
+}
+
+.app-shell .el-input,
+.app-shell .el-select,
+.app-shell .el-input-number,
+.app-shell .el-input-number .el-input,
+.app-shell .el-input-number .el-input__wrapper {
+  background: transparent !important;
+}
+
+.app-shell .el-input__wrapper,
+.app-shell .el-select__wrapper,
+.app-shell .el-textarea__inner,
+.app-shell .el-input-number__decrease,
+.app-shell .el-input-number__increase,
+.app-shell .el-input-number .el-input__inner {
+  color: #e9f8ff !important;
+  background: linear-gradient(180deg, rgba(3, 13, 25, 0.94), rgba(6, 23, 42, 0.90)) !important;
+  border-color: rgba(94, 185, 235, 0.34) !important;
+  box-shadow: inset 0 0 0 1px rgba(32, 230, 255, 0.08) !important;
+}
+
+.app-shell .el-input-number__decrease,
+.app-shell .el-input-number__increase {
+  border-color: rgba(94, 185, 235, 0.24) !important;
+}
+
+.app-shell .el-input__inner,
+.app-shell .el-select__selected-item,
+.app-shell .el-select__placeholder,
+.app-shell .el-input-number .el-input__inner {
+  color: #e9f8ff !important;
+  -webkit-text-fill-color: #e9f8ff !important;
+}
+
+.app-shell .el-select-dropdown,
+.app-shell .el-picker-panel,
+.app-shell .el-popper,
+.app-shell .el-dropdown-menu {
+  background: rgba(5, 18, 33, 0.98) !important;
+  border-color: rgba(32, 230, 255, 0.30) !important;
+  box-shadow: 0 18px 42px rgba(0, 8, 20, 0.48) !important;
+}
+
+.app-shell .el-select-dropdown__item,
+.app-shell .el-dropdown-menu__item,
+.app-shell .el-picker-panel,
+.app-shell .el-date-table td,
+.app-shell .el-date-table th {
+  color: #bfe6ff !important;
+  background: transparent !important;
+}
+
+.app-shell .el-select-dropdown__item.is-selected,
+.app-shell .el-select-dropdown__item.hover,
+.app-shell .el-select-dropdown__item:hover,
+.app-shell .el-dropdown-menu__item:hover {
+  color: #f2fcff !important;
+  background: rgba(24, 168, 255, 0.22) !important;
+}
+
+.app-shell table,
+.app-shell thead,
+.app-shell tbody,
+.app-shell tr,
+.app-shell th,
+.app-shell td,
+.app-shell .el-table,
+.app-shell .el-table__inner-wrapper,
+.app-shell .el-table__header-wrapper,
+.app-shell .el-table__body-wrapper,
+.app-shell .el-table tr,
+.app-shell .el-table th.el-table__cell,
+.app-shell .el-table td.el-table__cell {
+  color: #d7efff !important;
+  background: rgba(5, 18, 33, 0.72) !important;
+  border-color: rgba(32, 230, 255, 0.18) !important;
+}
+
+.app-shell .el-table__row:hover td,
+.app-shell tbody tr:hover,
+.app-shell tbody tr:hover td {
+  background: rgba(24, 168, 255, 0.12) !important;
+}
+
+.app-shell .modal,
+.app-shell .el-overlay,
+.app-shell .el-overlay-dialog {
+  background: rgba(1, 7, 14, 0.72) !important;
+}
+
+.app-shell .modal-card,
+.app-shell .el-dialog,
+.app-shell .el-drawer {
+  background: linear-gradient(180deg, rgba(7, 24, 43, 0.98), rgba(3, 14, 27, 0.96)) !important;
+}
+
+/* Workbench right rail: keep each status/control row on its own line. */
+.workbench .job-card {
+  min-width: 0;
+  max-height: calc(100vh - 132px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.workbench .sop-runtime-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.workbench .runtime-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.workbench .runtime-checks { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 16px; }
+.workbench .runtime-check { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 4px 7px; width: 100%; min-height: 42px; padding: 8px 9px; }
+.workbench .runtime-check small { grid-column: 2 / -1; min-width: 0; overflow-wrap: anywhere; }
+.workbench .runtime-step-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; width: 100%; }
+.workbench .runtime-step-list span { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; }
+.workbench .runtime-step-list span b { flex: 0 0 auto; }
+.workbench .visualization-controls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; width: 100%; margin-top: 18px; padding-top: 14px; }
+.workbench .visualization-controls > label { display: flex; width: 100%; min-height: 30px; align-items: center; justify-content: space-between; gap: 12px; }
+.workbench .visualization-controls > label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workbench .visualization-controls > label > i { flex: 0 0 34px; }
+.workbench .visualization-controls input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.workbench .visualization-controls > label > i { position: relative; display: block; height: 18px; border-radius: 999px; background: rgba(100,125,150,.45); }
+.workbench .visualization-controls > label > i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #b4c7d7; transition: .18s; }
+.workbench .visualization-controls > label:has(input:checked) > i { background: rgba(32,230,255,.72); box-shadow: 0 0 12px rgba(32,230,255,.24); }
+.workbench .visualization-controls > label:has(input:checked) > i::after { left: 18px; background: #f1ffff; }
+.workbench .landmark { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.workbench .runtime-reset { display: block; width: 100%; }
+
+@media (max-width: 1200px) {
+  .workbench .job-card { max-height: none; overflow: visible; }
+}

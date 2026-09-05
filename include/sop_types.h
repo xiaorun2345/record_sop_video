@@ -154,6 +154,8 @@ struct RoiRegion {
 struct PerceptionResult {
   std::int64_t frame_id = 0;                // 对应图像帧编号。
   double timestamp_sec = 0.0;               // 对应图像时间戳。
+  int image_width = 0;                      // 对应彩色图宽度。
+  int image_height = 0;                     // 对应彩色图高度。
   bool depth_aligned_to_color = false;      // 深度是否已对齐到彩色图。
   bool synchronized = true;                 // 多检测分支是否基于同一帧。
   double object_inference_ms = 0.0;         // 目标检测耗时，单位毫秒。
@@ -192,8 +194,12 @@ struct SopAlert {
  * @brief 单个必检物体规则。
  */
 struct RequiredObjectConfig {
+  std::string id;    // 配置对象 ID，用于对象关系匹配。
   std::string label;  // 物体类别名称。
   int min_count = 1;  // 最少需要出现的数量。
+  std::vector<std::string> roi_names;  // 目标中心点允许落入的 ROI；为空表示不限位置。
+  std::string relation_target_id;      // 关联目标对象 ID。
+  std::string relation_type;            // 目前支持 overlaps。
 };
 
 /**
@@ -209,6 +215,7 @@ struct SopStepConfig {
   double min_stage_sec = 0.8;                // 步骤最小驻留时间，防止切换瞬间误判，单位秒。
   double max_hand_object_distance_m = 0.0;   // 手腕与目标中心的最大 3D 距离，0 表示关闭。
   std::string warning_message;               // 超时或异常时的预警内容。
+  bool enabled = true;                       // 是否参与运行。
 };
 
 /**
@@ -221,6 +228,53 @@ struct SopRuntimeState {
   double step_start_sec = 0.0;      // 当前步骤开始时间。
   std::vector<int> required_object_max_counts;  // 当前步骤每个必检物体的历史最大数量。
   std::vector<SopAlert> alerts;     // 当前帧预警信息。
+  std::vector<int> confirm_counts;  // 有序/无序模式下每个步骤的连续确认帧数。
+  std::vector<double> step_start_times;  // 每个步骤的开始时间。
+  std::vector<std::vector<int>> required_object_max_counts_by_step;  // 每个步骤的历史最大数量。
+  std::vector<bool> completed_steps;  // 无序模式下各步骤是否已完成。
+};
+
+/** @brief 单个必检对象在当前帧的可解释判定结果。 */
+struct SopObjectCheckResult {
+  std::string object_id;
+  std::string label;
+  int required_count = 0;
+  int current_count = 0;
+  int best_count = 0;
+  bool roi_satisfied = true;
+  bool relation_satisfied = true;
+  bool satisfied_now = false;
+  std::vector<int> matched_track_ids;
+  std::string reason;
+};
+
+/** @brief 单个步骤的实时判定结果。 */
+struct SopStepRuntimeReport {
+  int index = 0;
+  std::string id;
+  std::string name;
+  bool enabled = true;
+  bool completed = false;
+  std::string state = "waiting";
+  int confirm_count = 0;
+  int confirm_target = 1;
+  double elapsed_sec = 0.0;
+  bool hand_roi_configured = false;
+  bool hand_roi_satisfied = true;
+  bool spatial_satisfied = true;
+  std::vector<SopObjectCheckResult> objects;
+};
+
+/** @brief C++ 运行时向 Web 工作台暴露的完整快照。 */
+struct SopRuntimeReport {
+  bool valid = false;
+  std::int64_t frame_id = 0;
+  double timestamp_sec = 0.0;
+  std::string execution_mode = "ordered";
+  int current_step_index = 0;
+  bool finished = false;
+  std::vector<SopStepRuntimeReport> steps;
+  std::vector<SopAlert> alerts;
 };
 
 /**
@@ -289,6 +343,7 @@ struct SopAppConfig {
   SerialLightConfig serial_light;        // CH341 串口报警灯配置。
   std::vector<RoiRegion> rois;          // ROI 配置列表。
   std::vector<SopStepConfig> steps;     // SOP 步骤列表。
+  std::string execution_mode = "ordered";  // ordered 或 unordered。
   bool show_window = true;              // 是否显示窗口。
   bool save_video = false;              // 是否保存结果视频。
   std::string output_video_path;        // 结果视频路径。
